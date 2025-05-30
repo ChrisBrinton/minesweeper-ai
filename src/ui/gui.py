@@ -4,46 +4,135 @@ Implements the classic minesweeper user interface using tkinter
 """
 
 import tkinter as tk
-from tkinter import messagebox, Menu
+from tkinter import messagebox, Menu, PhotoImage, font
 import time
-from typing import List, Callable, Optional
+import os
+from typing import List, Callable, Optional, Dict
 
 from game import GameBoard, GameState, CellState
 
 
 class DigitalDisplay(tk.Frame):
-    """Digital display widget for mine counter and timer"""
+    """Digital display widget for mine counter and timer using 7-segment display images"""
+    
+    # Class variable to cache loaded digit images
+    _digit_images = {}
+    
+    @classmethod
+    def load_digit_images(cls):
+        """Load all digit images if not already loaded"""
+        if not cls._digit_images:
+            digits_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets', 'digits')
+            
+            # Load digits 0-9
+            for i in range(10):
+                image_path = os.path.join(digits_path, f"{i}_digit.png")
+                if os.path.exists(image_path):
+                    cls._digit_images[str(i)] = PhotoImage(file=image_path)
+            
+            # Load minus sign and blank digit
+            minus_path = os.path.join(digits_path, "minus_digit.png")
+            blank_path = os.path.join(digits_path, "blank_digit.png")
+            
+            if os.path.exists(minus_path):
+                cls._digit_images['-'] = PhotoImage(file=minus_path)
+            
+            if os.path.exists(blank_path):
+                cls._digit_images[' '] = PhotoImage(file=blank_path)
     
     def __init__(self, parent, width=3):
-        super().__init__(parent, bg='black', relief='sunken', bd=2)
+        super().__init__(parent, bg='black', relief='sunken', bd=3, padx=3, pady=3)
         self.width = width
         self.value = 0
         
-        self.label = tk.Label(
-            self, 
-            text=self._format_number(0),
-            font=('Courier', 16, 'bold'),
-            fg='red',
-            bg='black',
-            width=self.width
-        )
-        self.label.pack(padx=2, pady=2)
+        # Make sure digit images are loaded
+        self.load_digit_images()
+        
+        # Create a frame to hold all digits
+        digit_frame = tk.Frame(self, bg='black')
+        digit_frame.pack(fill='both', expand=True)
+        
+        # Create labels for each digit position
+        self.digit_labels = []
+        for i in range(width):
+            label = tk.Label(digit_frame, bg='black', bd=0, padx=0)
+            label.pack(side='left')
+            self.digit_labels.append(label)
+        
+        # Set initial value
+        self.set_value(0)
     
     def _format_number(self, num: int) -> str:
         """Format number with leading zeros for digital display"""
         if num < 0:
+            if abs(num) >= 10**(self.width-1):  # If too large to fit with minus sign
+                return '-' + '9' * (self.width-1)
             return f"-{abs(num):0{self.width-1}d}"[:self.width]
+        
+        if num >= 10**self.width:  # If too large to fit
+            return '9' * self.width
+            
         return f"{num:0{self.width}d}"[:self.width]
     
     def set_value(self, value: int):
-        """Update the display value"""
+        """Update the display value using digit images"""
         self.value = value
-        self.label.config(text=self._format_number(value))
+        
+        # Get formatted string representation
+        formatted = self._format_number(value)
+        
+        # Update each digit label with the appropriate image
+        for i, digit in enumerate(formatted):
+            if i < len(self.digit_labels):
+                if digit in self._digit_images:
+                    self.digit_labels[i].config(image=self._digit_images[digit])
+                else:
+                    # Fallback if image not found
+                    if digit == '-':
+                        self.digit_labels[i].config(image=self._digit_images.get(' ', None), text='-', fg='red')
+                    else:
+                        self.digit_labels[i].config(image=self._digit_images.get(' ', None), text=digit, fg='red')
 
 
 class SmileyButton(tk.Button):
     """Smiley face button that shows game state"""
     
+    # Class variable to store loaded images
+    _images: Dict[str, PhotoImage] = {}
+    
+    @classmethod
+    def load_images(cls):
+        """Load image files for smiley faces if not already loaded"""
+        if cls._images:  # Images already loaded
+            return
+            
+        # Define the base assets directory
+        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets')
+        
+        # Define image filenames to look for
+        image_files = {
+            'ready': 'smiley_normal.png',
+            'playing': 'smiley_normal.png',
+            'won': 'smiley_win.png',
+            'lost': 'smiley_dead.png',
+            'pressed': 'smiley_pressed.png'
+        }
+        
+        # Try to load each image
+        for key, filename in image_files.items():
+            try:
+                image_path = os.path.join(assets_dir, filename)
+                if os.path.exists(image_path):
+                    cls._images[key] = PhotoImage(file=image_path)
+                    print(f"Successfully loaded smiley image: {filename}")
+                else:
+                    print(f"Smiley image file not found: {image_path}")
+                    cls._images[key] = None  # Mark as unavailable
+            except Exception as e:
+                print(f"Error loading smiley image {filename}: {e}")
+                cls._images[key] = None
+    
+    # Fallback emojis if images are not available
     FACES = {
         GameState.READY: '😊',
         GameState.PLAYING: '😊', 
@@ -54,35 +143,67 @@ class SmileyButton(tk.Button):
     def __init__(self, parent, command=None):
         super().__init__(
             parent,
-            text=self.FACES[GameState.READY],
-            font=('Arial', 16),
-            width=3,
-            height=1,
             relief='raised',
             bd=2,
             command=command
         )
         self.current_state = GameState.READY
+        
+        # Load images if not already loaded
+        self.load_images()
+        
+        # Set initial face - use a specific image key to ensure it works on startup
+        if self._images.get('ready'):
+            self.config(image=self._images['ready'], width=26, height=26)
+        else:
+            self.config(text=self.FACES.get(GameState.READY, '😊'))
+        
+        # Bind mouse events
+        self.bind('<Button-1>', self._on_press)
+        self.bind('<ButtonRelease-1>', self._on_release)
+    
+    def _on_press(self, event):
+        """Handle mouse button press"""
+        if self.current_state == GameState.PLAYING:
+            self.set_pressed_face()
+        
+    def _on_release(self, event):
+        """Handle mouse button release"""
+        self.restore_face()
+        # The actual command will be executed by the button's built-in handler
     
     def set_state(self, state: GameState):
         """Update smiley face based on game state"""
         if state != self.current_state:
             self.current_state = state
-            self.config(text=self.FACES.get(state, '😊'))
+            
+            # Use image if available, otherwise fallback to emoji
+            state_key = state.value  # 'ready', 'playing', 'won', 'lost'
+            if self._images.get(state_key):
+                self.config(image=self._images[state_key], text='')
+            else:
+                self.config(text=self.FACES.get(state, '😊'), image='')
     
     def set_pressed_face(self):
         """Show worried face while mouse is pressed"""
         if self.current_state == GameState.PLAYING:
-            self.config(text='😬')
+            if self._images.get('pressed'):
+                self.config(image=self._images['pressed'], text='')
+            else:
+                self.config(text='😬', image='')
     
     def restore_face(self):
         """Restore normal face for current state"""
-        self.config(text=self.FACES.get(self.current_state, '😊'))
+        state_key = self.current_state.value
+        if self._images.get(state_key):
+            self.config(image=self._images[state_key], text='')
+        else:
+            self.config(text=self.FACES.get(self.current_state, '😊'), image='')
 
 
-class CellButton(tk.Button):
+class CellButton(tk.Frame):
     """Individual cell button on the minesweeper grid"""
-      # Colors for different numbers
+    # Colors for different numbers
     NUMBER_COLORS = {
         1: 'blue',
         2: 'green', 
@@ -90,40 +211,109 @@ class CellButton(tk.Button):
         4: 'purple',
         5: 'maroon',
         6: 'turquoise',
-        7: 'black',        8: 'gray'
+        7: 'black',
+        8: 'gray'
     }
     
+    # Class variable to store loaded images
+    _images: Dict[str, PhotoImage] = {}
+    
+    @classmethod
+    def load_images(cls):
+        """Load image files for cells if not already loaded"""
+        if cls._images:  # Images already loaded
+            return
+            
+        # Define the base assets directory
+        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets')
+        print(f"Loading images from: {assets_dir}")
+          
+        # Define image filenames to look for
+        image_files = {
+            'hidden': 'hidden_cell.png',
+            'empty': 'empty_cell.png',
+            'mine': 'mine_cell.png',
+            'flag': 'flag_cell.png',
+            'mine_red': 'mine_red_cell.png',  # For clicked mine
+        }
+        
+        # Add numbered cells
+        for i in range(1, 9):
+            image_files[f'num_{i}'] = f'{i}_cell.png'
+          
+        # Try to load each image
+        loaded_count = 0
+        for key, filename in image_files.items():
+            try:
+                image_path = os.path.join(assets_dir, filename)
+                if os.path.exists(image_path):
+                    cls._images[key] = PhotoImage(file=image_path)
+                    print(f"Successfully loaded image: {filename}")
+                    loaded_count += 1
+                else:
+                    print(f"Image file not found: {image_path}")
+                    cls._images[key] = None  # Mark as unavailable
+            except Exception as e:
+                print(f"Error loading image {filename}: {e}")
+                cls._images[key] = None
+                
+        print(f"Successfully loaded {loaded_count} of {len(image_files)} images")
+    
     def __init__(self, parent, row: int, col: int, click_callback: Callable, 
-                 right_click_callback: Callable):
+                right_click_callback: Callable):
         super().__init__(
             parent,
-            width=2,
-            height=1,
-            font=('Arial', 9, 'bold'),
+            width=16,  # Standard size for minesweeper cells
+            height=16,  # Standard size for minesweeper cells
             relief='raised',
-            bd=2,
-            bg='lightgray',
-            command=lambda: click_callback(row, col)  # Use command for left click
+            bd=1,  # Thin border between cells
+            bg='#c0c0c0'  # Standard Windows gray
         )
+        
+        # Make frame non-expandable to maintain exact size
+        self.pack_propagate(False)
+        self.grid_propagate(False)
+        
+        # Load images if not already loaded
+        self.load_images()
+        
+        # Create label for content (image or text)
+        self.label = tk.Label(
+            self,
+            bg='#c0c0c0',
+            bd=0,
+            highlightthickness=0,
+            padx=0, 
+            pady=0
+        )
+        self.label.pack(fill=tk.BOTH, expand=True)
         
         self.row = row
         self.col = col
         self.click_callback = click_callback
         self.right_click_callback = right_click_callback
         
-        # Bind mouse events
-        self.bind('<Button-3>', self._on_right_click)  # Right click only        self.bind('<ButtonPress-1>', self._on_press)
-        self.bind('<ButtonRelease-1>', self._on_release)
+        # Initialize with hidden cell appearance
+        if self._images.get('hidden'):
+            self.label.config(image=self._images['hidden'], text='', bg='#c0c0c0')
+        else:
+            # Fallback to default appearance if image not available
+            self.label.config(text='', bg='#c0c0c0')
+        
+        # Bind click events
+        for widget in [self, self.label]:
+            widget.bind('<Button-1>', self._on_left_click)
+            widget.bind('<Button-3>', self._on_right_click)
+    
+    def _on_left_click(self, event):
+        """Handle left mouse click"""
+        self.click_callback(self.row, self.col)
+        return "break"
     
     def _on_right_click(self, event):
         """Handle right mouse click"""
         self.right_click_callback(self.row, self.col)
-        return "break"  # Prevent event propagation
-    
-    def _on_press(self, event):
-        """Handle mouse button press"""
-        if self['relief'] == 'raised':
-            self.config(relief='sunken')
+        return "break"
     
     def _on_release(self, event):
         """Handle mouse button release"""
@@ -133,20 +323,57 @@ class CellButton(tk.Button):
     def update_display(self, cell):
         """Update button display based on cell state"""
         if cell.state == CellState.REVEALED:
-            self.config(relief='sunken', bg='lightgray')
+            # Configure frame for revealed state
+            self.config(relief='sunken', bd=1)
+            
             if cell.is_mine:
-                self.config(text='💣', bg='red')
+                # Use mine image if available, otherwise fallback to emoji
+                if self._images.get('mine_red'):
+                    self.label.config(image=self._images['mine_red'], text='')
+                else:
+                    self.label.config(text='💣', image='')
+                
+                self.config(bg='red')
+                self.label.config(bg='red')
             elif cell.adjacent_mines > 0:
-                self.config(
-                    text=str(cell.adjacent_mines),
-                    fg=self.NUMBER_COLORS.get(cell.adjacent_mines, 'black')
-                )
+                # Use numbered cell image if available, otherwise fallback to text
+                img_key = f'num_{cell.adjacent_mines}'
+                if self._images.get(img_key):
+                    self.label.config(image=self._images[img_key], text='')
+                else:
+                    self.label.config(
+                        text=str(cell.adjacent_mines),
+                        fg=self.NUMBER_COLORS.get(cell.adjacent_mines, 'black'),
+                        image=''
+                    )
+                self.config(bg='#c0c0c0')
+                self.label.config(bg='#c0c0c0')
             else:
-                self.config(text='')
+                # Use empty cell image if available, otherwise just clear the text
+                if self._images.get('empty'):
+                    self.label.config(image=self._images['empty'], text='')
+                else:
+                    self.label.config(text='', image='')
+                self.config(bg='#c0c0c0')
+                self.label.config(bg='#c0c0c0')
         elif cell.state == CellState.FLAGGED:
-            self.config(text='🚩', relief='raised', bg='lightgray')
+            # Configure frame for flagged state
+            self.config(relief='raised', bd=1, bg='#c0c0c0')
+            
+            # Use flag image if available, otherwise fallback to emoji
+            if self._images.get('flag'):
+                self.label.config(image=self._images['flag'], text='', bg='#c0c0c0')
+            else:
+                self.label.config(text='🚩', image='', bg='#c0c0c0')
         else:  # HIDDEN
-            self.config(text='', relief='raised', bg='lightgray')
+            # Configure frame for hidden state
+            self.config(relief='raised', bd=1, bg='#c0c0c0')
+            
+            # Use hidden cell image if available, otherwise just clear the text
+            if self._images.get('hidden'):
+                self.label.config(image=self._images['hidden'], text='', bg='#c0c0c0')
+            else:
+                self.label.config(text='', image='', bg='#c0c0c0')
 
 
 class MinesweeperGUI:
@@ -178,6 +405,9 @@ class MinesweeperGUI:
         main_frame = tk.Frame(self.root, bg='lightgray', relief='raised', bd=3)
         main_frame.pack(padx=5, pady=5)
         
+        # Load digit images for the 7-segment displays
+        DigitalDisplay.load_digit_images()
+        
         # Top panel with displays and smiley
         top_frame = tk.Frame(main_frame, bg='lightgray')
         top_frame.pack(fill='x', padx=5, pady=5)
@@ -190,6 +420,8 @@ class MinesweeperGUI:
         smiley_frame = tk.Frame(top_frame, bg='lightgray')
         smiley_frame.pack(side='left', expand=True)
         
+        # Load smiley images and create button
+        SmileyButton.load_images()
         self.smiley_button = SmileyButton(smiley_frame, command=self._restart_game)
         self.smiley_button.pack()
         
@@ -240,12 +472,21 @@ class MinesweeperGUI:
         # Reset displays
         self.mine_display.set_value(mines)
         self.timer_display.set_value(0)
+        
+        # Load images for buttons
+        CellButton.load_images()
+        SmileyButton.load_images()
+        
+        # Update smiley face state
         self.smiley_button.set_state(GameState.READY)
         self.start_time = None
         
         # Clear existing buttons
         for widget in self.game_frame.winfo_children():
             widget.destroy()
+        
+        # Load cell images before creating buttons
+        CellButton.load_images()
         
         # Create new cell buttons
         self.cell_buttons = []
@@ -254,14 +495,17 @@ class MinesweeperGUI:
             for col in range(cols):
                 button = CellButton(
                     self.game_frame,
-                    row, col,
-                    self._on_cell_click,
+                    row, col, self._on_cell_click,
                     self._on_cell_right_click
                 )
-                button.grid(row=row, column=col, padx=1, pady=1)
+                button.grid(row=row, column=col, padx=0, pady=0)
                 button_row.append(button)
             self.cell_buttons.append(button_row)
-          # Update window size
+        
+        # Initialize display for all cells
+        self._update_display()
+        
+        # Update window size
         self.root.update_idletasks()
     
     def _restart_game(self):
@@ -359,15 +603,8 @@ class MinesweeperGUI:
             self.root.after_cancel(self.game_timer_id)
             self.game_timer_id = None
         
-        # Show appropriate message
-        if self.game_board.game_state == GameState.WON:
-            elapsed = int(time.time() - self.start_time) if self.start_time else 0
-            messagebox.showinfo(
-                "Congratulations!", 
-                f"You won!\nTime: {elapsed} seconds"
-            )
-        elif self.game_board.game_state == GameState.LOST:
-            messagebox.showinfo("Game Over", "You hit a mine!")
+        # No popup needed - the game state is shown through the smiley face
+        # and the revealed board state
     
     def _show_help(self):
         """Show help dialog"""

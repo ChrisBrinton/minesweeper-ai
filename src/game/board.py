@@ -91,9 +91,18 @@ class GameBoard:
             self.board.append(board_row)
     
     def _place_mines(self, first_click_row: int, first_click_col: int):
-        """Place mines randomly, avoiding the first click position"""
+        """Place mines randomly, avoiding a 3x3 area around the first click position"""
         total_cells = self.rows * self.cols
-        available_cells = total_cells - 1  # Exclude first click position
+        
+        # Create a set of safe positions (3x3 grid around first click)
+        safe_positions = set()
+        for dr in [-1, 0, 1]:
+            for dc in [-1, 0, 1]:
+                nr, nc = first_click_row + dr, first_click_col + dc
+                if 0 <= nr < self.rows and 0 <= nc < self.cols:
+                    safe_positions.add((nr, nc))
+        
+        available_cells = total_cells - len(safe_positions)
         
         # Ensure we don't try to place more mines than available positions
         mines_to_place = min(self.total_mines, available_cells)
@@ -103,8 +112,8 @@ class GameBoard:
             row = random.randint(0, self.rows - 1)
             col = random.randint(0, self.cols - 1)
             
-            # Don't place mine on first click or if already has mine
-            if (row == first_click_row and col == first_click_col) or self.board[row][col].is_mine:
+            # Don't place mine in safe area or if already has mine
+            if (row, col) in safe_positions or self.board[row][col].is_mine:
                 continue
                 
             self.board[row][col].place_mine()

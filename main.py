@@ -9,7 +9,7 @@ import os
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from ui import MinesweeperGUI
+from ui.gui import MinesweeperGUI
 
 
 def main():
