@@ -320,21 +320,34 @@ class CellButton(tk.Frame):
         # Relief will be updated by update_display method
         pass
     
-    def update_display(self, cell):
+    def update_display(self, cell, game_board=None):
         """Update button display based on cell state"""
         if cell.state == CellState.REVEALED:
             # Configure frame for revealed state
             self.config(relief='sunken', bd=1)
             
             if cell.is_mine:
-                # Use mine image if available, otherwise fallback to emoji
-                if self._images.get('mine_red'):
-                    self.label.config(image=self._images['mine_red'], text='')
-                else:
-                    self.label.config(text='💣', image='')
+                # Check if this is the clicked mine (should be red) or just a regular mine
+                is_clicked_mine = (game_board and 
+                                 game_board.clicked_mine_pos and 
+                                 game_board.clicked_mine_pos == (self.row, self.col))
                 
-                self.config(bg='red')
-                self.label.config(bg='red')
+                if is_clicked_mine:
+                    # Use red mine image for the clicked mine
+                    if self._images.get('mine_red'):
+                        self.label.config(image=self._images['mine_red'], text='')
+                    else:
+                        self.label.config(text='💣', image='')
+                    self.config(bg='red')
+                    self.label.config(bg='red')
+                else:
+                    # Use regular mine image for other mines
+                    if self._images.get('mine'):
+                        self.label.config(image=self._images['mine'], text='')
+                    else:
+                        self.label.config(text='💣', image='')
+                    self.config(bg='#c0c0c0')
+                    self.label.config(bg='#c0c0c0')
             elif cell.adjacent_mines > 0:
                 # Use numbered cell image if available, otherwise fallback to text
                 img_key = f'num_{cell.adjacent_mines}'
@@ -582,7 +595,7 @@ class MinesweeperGUI:
         for row in range(self.game_board.rows):
             for col in range(self.game_board.cols):
                 cell = self.game_board.get_cell(row, col)
-                self.cell_buttons[row][col].update_display(cell)
+                self.cell_buttons[row][col].update_display(cell, self.game_board)
     
     def _update_timer(self):
         """Update the game timer"""

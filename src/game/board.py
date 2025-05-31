@@ -62,12 +62,12 @@ class Cell:
 
 class GameBoard:
     """Manages the minesweeper game board and game logic"""
-    
-    # Difficulty presets (rows, cols, mines)
+      # Difficulty presets (rows, cols, mines)
     DIFFICULTIES = {
         'beginner': (9, 9, 10),
         'intermediate': (16, 16, 40),
-        'expert': (16, 30, 99)    }
+        'expert': (16, 30, 99)
+    }
     
     def __init__(self, rows: int = 9, cols: int = 9, mines: int = 10):
         self.rows = rows
@@ -78,6 +78,7 @@ class GameBoard:
         self.mines_placed = False
         self.flags_used = 0
         self.cells_revealed = 0
+        self.clicked_mine_pos = None  # Track position of clicked mine for red display
         
         self._initialize_board()
     
@@ -91,16 +92,24 @@ class GameBoard:
             self.board.append(board_row)
     
     def _place_mines(self, first_click_row: int, first_click_col: int):
-        """Place mines randomly, avoiding a 3x3 area around the first click position"""
+        """Place mines randomly, avoiding the first click area"""
         total_cells = self.rows * self.cols
         
-        # Create a set of safe positions (3x3 grid around first click)
+        # Create a set of safe positions
+        # For small boards (< 5x5), use only the clicked cell as safe
+        # For larger boards, use a 3x3 area around the first click
         safe_positions = set()
-        for dr in [-1, 0, 1]:
-            for dc in [-1, 0, 1]:
-                nr, nc = first_click_row + dr, first_click_col + dc
-                if 0 <= nr < self.rows and 0 <= nc < self.cols:
-                    safe_positions.add((nr, nc))
+        
+        if self.rows < 5 or self.cols < 5:
+            # Small board: only the clicked cell is safe
+            safe_positions.add((first_click_row, first_click_col))
+        else:
+            # Larger board: 3x3 area around first click is safe
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    nr, nc = first_click_row + dr, first_click_col + dc
+                    if 0 <= nr < self.rows and 0 <= nc < self.cols:
+                        safe_positions.add((nr, nc))
         
         available_cells = total_cells - len(safe_positions)
         
@@ -108,19 +117,23 @@ class GameBoard:
         mines_to_place = min(self.total_mines, available_cells)
         placed_mines = 0
         
-        while placed_mines < mines_to_place:
-            row = random.randint(0, self.rows - 1)
-            col = random.randint(0, self.cols - 1)
-            
-            # Don't place mine in safe area or if already has mine
-            if (row, col) in safe_positions or self.board[row][col].is_mine:
-                continue
+        # If there are no available cells for mines, set mines to 0
+        if available_cells <= 0:
+            self.total_mines = 0
+        else:
+            while placed_mines < mines_to_place:
+                row = random.randint(0, self.rows - 1)
+                col = random.randint(0, self.cols - 1)
                 
-            self.board[row][col].place_mine()
-            placed_mines += 1
-        
-        # Update total_mines to reflect actual mines placed
-        self.total_mines = placed_mines
+                # Don't place mine in safe area or if already has mine
+                if (row, col) in safe_positions or self.board[row][col].is_mine:
+                    continue
+                    
+                self.board[row][col].place_mine()
+                placed_mines += 1
+            
+            # Update total_mines to reflect actual mines placed
+            self.total_mines = placed_mines
         
         self._calculate_adjacent_mines()
         self.mines_placed = True
@@ -163,13 +176,13 @@ class GameBoard:
         if not self.mines_placed:
             self._place_mines(row, col)
             self.game_state = GameState.PLAYING
-        
-        # Reveal the cell
+          # Reveal the cell
         if cell.reveal():
             self.cells_revealed += 1
             
             # Check if hit a mine
             if cell.is_mine:
+                self.clicked_mine_pos = (row, col)  # Track which mine was clicked
                 self.game_state = GameState.LOST
                 self._reveal_all_mines()
                 return False
@@ -245,9 +258,9 @@ class GameBoard:
         """Reset the game to initial state"""
         if difficulty and difficulty in self.DIFFICULTIES:
             self.rows, self.cols, self.total_mines = self.DIFFICULTIES[difficulty]
-        
         self.game_state = GameState.READY
         self.mines_placed = False
         self.flags_used = 0
         self.cells_revealed = 0
+        self.clicked_mine_pos = None  # Reset clicked mine position
         self._initialize_board()
