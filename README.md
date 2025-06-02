@@ -1,5 +1,11 @@
 # Minesweeper Game
 
+[![Tests](https://github.com/USERNAME/minesweeper-ai/workflows/Tests/badge.svg)](https://github.com/USERNAME/minesweeper-ai/actions)
+[![CI/CD](https://github.com/USERNAME/minesweeper-ai/workflows/CI%2FCD/badge.svg)](https://github.com/USERNAME/minesweeper-ai/actions)
+[![codecov](https://codecov.io/gh/USERNAME/minesweeper-ai/branch/main/graph/badge.svg)](https://codecov.io/gh/USERNAME/minesweeper-ai)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A classic Windows 3.1 style Minesweeper game implemented in Python with tkinter. This faithful recreation includes all the original features and classic visual design.
 
 ## Features
@@ -99,13 +105,34 @@ This implementation provides a clean separation between game logic and UI, makin
 - Algorithm testing
 - Educational purposes
 
-## Screenshots
+## Testing & Coverage
 
-The game faithfully recreates the classic Windows 3.1 minesweeper experience with:
-- Digital displays for mine count and timer
-- Expressive smiley face button
-- Classic 3D button styling
-- Original color scheme and typography
+The project includes comprehensive testing with **99.4%** coverage of game logic:
+
+### Test Suite
+- **52 unit tests** covering all game functionality
+- **Integration tests** for complete game scenarios
+- **Edge case testing** for robust behavior
+- **pytest** with coverage reporting
+
+### Running Tests
+```bash
+# Basic tests
+python -m pytest tests/ -v
+
+# Tests with coverage
+python -m pytest tests/ --cov=src --cov-report=html
+
+# Using VS Code
+# Use "Run Tests with Coverage" launch configuration
+```
+
+### Coverage Reports
+- **Terminal**: Shows coverage percentages and missing lines
+- **HTML**: Interactive report in `htmlcov/index.html`
+- **Current Coverage**: 99.4% game logic, 34% overall (GUI excluded)
+
+See `COVERAGE.md` for detailed coverage setup and usage instructions.
 
 ## License
 

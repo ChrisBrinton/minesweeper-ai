@@ -29,9 +29,20 @@ class TestGameIntegration:
         assert first_cell.is_mine is False
         assert first_cell.state == CellState.REVEALED
         
-        # Flag some cells
-        board.toggle_flag(0, 0)
-        board.toggle_flag(0, 1)
+        # Flag some cells that are guaranteed to be hidden
+        # Find hidden cells to flag instead of assuming specific positions
+        flagged_count = 0
+        for row in range(board.rows):
+            for col in range(board.cols):
+                cell = board.get_cell(row, col)
+                if cell.state == CellState.HIDDEN and flagged_count < 2:
+                    board.toggle_flag(row, col)
+                    flagged_count += 1
+                if flagged_count == 2:
+                    break
+            if flagged_count == 2:
+                break
+        
         assert board.flags_used == 2
         assert board.get_remaining_mines() == 8
     
