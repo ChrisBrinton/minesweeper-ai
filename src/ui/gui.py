@@ -408,7 +408,6 @@ class MinesweeperGUI:
         self.timer_display: Optional[DigitalDisplay] = None
         self.smiley_button: Optional[SmileyButton] = None
         self.game_frame: Optional[tk.Frame] = None
-        
         self._setup_gui()
         self._new_game('beginner')
     
@@ -418,8 +417,10 @@ class MinesweeperGUI:
         main_frame = tk.Frame(self.root, bg='lightgray', relief='raised', bd=3)
         main_frame.pack(padx=5, pady=5)
         
-        # Load digit images for the 7-segment displays
+        # OPTIMIZATION: Load all images once during startup
         DigitalDisplay.load_digit_images()
+        SmileyButton.load_images()
+        CellButton.load_images()
         
         # Top panel with displays and smiley
         top_frame = tk.Frame(main_frame, bg='lightgray')
@@ -433,8 +434,6 @@ class MinesweeperGUI:
         smiley_frame = tk.Frame(top_frame, bg='lightgray')
         smiley_frame.pack(side='left', expand=True)
         
-        # Load smiley images and create button
-        SmileyButton.load_images()
         self.smiley_button = SmileyButton(smiley_frame, command=self._restart_game)
         self.smiley_button.pack()
         
@@ -470,7 +469,6 @@ class MinesweeperGUI:
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="How to Play", command=self._show_help)
         help_menu.add_command(label="About", command=self._show_about)
-    
     def _new_game(self, difficulty: str):
         """Start a new game with specified difficulty"""
         # Stop current timer
@@ -486,39 +484,22 @@ class MinesweeperGUI:
         self.mine_display.set_value(mines)
         self.timer_display.set_value(0)
         
-        # Load images for buttons
-        CellButton.load_images()
-        SmileyButton.load_images()
-        
         # Update smiley face state
         self.smiley_button.set_state(GameState.READY)
         self.start_time = None
         
-        # Clear existing buttons
-        for widget in self.game_frame.winfo_children():
-            widget.destroy()
+        # OPTIMIZATION: Check if we can reuse existing buttons
+        current_size = (len(self.cell_buttons), len(self.cell_buttons[0])) if self.cell_buttons else (0, 0)
+        target_size = (rows, cols)
         
-        # Load cell images before creating buttons
-        CellButton.load_images()
+        if current_size != target_size:
+            # Size changed - need to recreate buttons
+            self._recreate_buttons(rows, cols)
+        else:
+            # Same size - just reset existing buttons (much faster!)
+            self._reset_existing_buttons()
         
-        # Create new cell buttons
-        self.cell_buttons = []
-        for row in range(rows):
-            button_row = []
-            for col in range(cols):
-                button = CellButton(
-                    self.game_frame,
-                    row, col, self._on_cell_click,
-                    self._on_cell_right_click
-                )
-                button.grid(row=row, column=col, padx=0, pady=0)
-                button_row.append(button)
-            self.cell_buttons.append(button_row)
-        
-        # Initialize display for all cells
-        self._update_display()
-        
-        # Update window size
+        # OPTIMIZATION: Single layout update at the end instead of multiple updates
         self.root.update_idletasks()
     
     def _restart_game(self):
@@ -656,3 +637,37 @@ Faithful recreation of the original game
     def run(self):
         """Start the GUI main loop"""
         self.root.mainloop()
+    
+    def _recreate_buttons(self, rows: int, cols: int):
+        """Create new buttons when board size changes (OPTIMIZATION: Only when needed)"""
+        # Clear existing buttons
+        for widget in self.game_frame.winfo_children():
+            widget.destroy()
+        
+        # Create new cell buttons
+        self.cell_buttons = []
+        for row in range(rows):
+            button_row = []
+            for col in range(cols):
+                button = CellButton(
+                    self.game_frame,
+                    row, col, self._on_cell_click,
+                    self._on_cell_right_click
+                )
+                button.grid(row=row, column=col, padx=0, pady=0)
+                button_row.append(button)
+            self.cell_buttons.append(button_row)
+        
+        # Initialize display for all cells
+        self._update_display()
+    
+    def _reset_existing_buttons(self):
+        """Reset existing buttons to hidden state (OPTIMIZATION: Reuse existing widgets)"""
+        # Just update display without recreating widgets - much faster!
+        self._update_display()
+    
+    def _create_buttons(self):
+        """Create initial button grid (used only during GUI setup)"""
+        # This method is kept for the initial GUI setup
+        rows, cols, mines = GameBoard.DIFFICULTIES['beginner']
+        self._recreate_buttons(rows, cols)

@@ -81,7 +81,6 @@ class GameBoard:
         self.clicked_mine_pos = None  # Track position of clicked mine for red display
         
         self._initialize_board()
-    
     def _initialize_board(self):
         """Initialize empty board without mines"""
         self.board = []
@@ -92,7 +91,7 @@ class GameBoard:
             self.board.append(board_row)
     
     def _place_mines(self, first_click_row: int, first_click_col: int):
-        """Place mines randomly, avoiding the first click area"""
+        """Place mines randomly, avoiding the first click area using efficient shuffle algorithm"""
         total_cells = self.rows * self.cols
         
         # Create a set of safe positions
@@ -111,29 +110,33 @@ class GameBoard:
                     if 0 <= nr < self.rows and 0 <= nc < self.cols:
                         safe_positions.add((nr, nc))
         
-        available_cells = total_cells - len(safe_positions)
+        # Create list of all valid positions (excluding safe area)
+        valid_positions = []
+        for row in range(self.rows):
+            for col in range(self.cols):
+                if (row, col) not in safe_positions:
+                    valid_positions.append((row, col))
+        
+        available_cells = len(valid_positions)
         
         # Ensure we don't try to place more mines than available positions
         mines_to_place = min(self.total_mines, available_cells)
-        placed_mines = 0
         
         # If there are no available cells for mines, set mines to 0
         if available_cells <= 0:
             self.total_mines = 0
         else:
-            while placed_mines < mines_to_place:
-                row = random.randint(0, self.rows - 1)
-                col = random.randint(0, self.cols - 1)
-                
-                # Don't place mine in safe area or if already has mine
-                if (row, col) in safe_positions or self.board[row][col].is_mine:
-                    continue
-                    
+            # Use Fisher-Yates shuffle algorithm for O(n) mine placement
+            # This is much more efficient than rejection sampling
+            random.shuffle(valid_positions)
+            
+            # Place mines at the first 'mines_to_place' positions
+            for i in range(mines_to_place):
+                row, col = valid_positions[i]
                 self.board[row][col].place_mine()
-                placed_mines += 1
             
             # Update total_mines to reflect actual mines placed
-            self.total_mines = placed_mines
+            self.total_mines = mines_to_place
         
         self._calculate_adjacent_mines()
         self.mines_placed = True
