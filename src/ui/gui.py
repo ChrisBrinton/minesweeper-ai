@@ -10,6 +10,7 @@ import os
 from typing import List, Callable, Optional, Dict
 
 from game import GameBoard, GameState, CellState
+from .leaderboard import LeaderboardManager, show_leaderboard, congratulate_new_record
 
 
 class DigitalDisplay(tk.Frame):
@@ -397,11 +398,15 @@ class MinesweeperGUI:
         self.root.title('Minesweeper')
         self.root.resizable(False, False)
         
+        # Leaderboard system
+        self.leaderboard_manager = LeaderboardManager()
+        
         # Game components
         self.game_board: Optional[GameBoard] = None
         self.cell_buttons: List[List[CellButton]] = []
         self.start_time: Optional[float] = None
         self.game_timer_id: Optional[str] = None
+        self.current_difficulty: str = 'beginner'
         
         # GUI components
         self.mine_display: Optional[DigitalDisplay] = None
@@ -409,7 +414,10 @@ class MinesweeperGUI:
         self.smiley_button: Optional[SmileyButton] = None
         self.game_frame: Optional[tk.Frame] = None
         self._setup_gui()
-        self._new_game('beginner')
+        
+        # Start with the last played difficulty
+        last_difficulty = self.leaderboard_manager.get_last_difficulty()
+        self._new_game(last_difficulty)
     
     def _setup_gui(self):
         """Setup the main GUI components"""
@@ -452,8 +460,7 @@ class MinesweeperGUI:
         """Setup the menu bar"""
         menubar = Menu(self.root)
         self.root.config(menu=menubar)
-        
-        # Game menu
+          # Game menu
         game_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Game", menu=game_menu)
         game_menu.add_command(label="New Game", command=self._restart_game)
@@ -462,6 +469,8 @@ class MinesweeperGUI:
         game_menu.add_command(label="Intermediate", command=lambda: self._new_game('intermediate'))
         game_menu.add_command(label="Expert", command=lambda: self._new_game('expert'))
         game_menu.add_separator()
+        game_menu.add_command(label="Best Times...", command=self._show_leaderboard)
+        game_menu.add_separator()
         game_menu.add_command(label="Exit", command=self.root.quit)
         
         # Help menu
@@ -469,12 +478,17 @@ class MinesweeperGUI:
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="How to Play", command=self._show_help)
         help_menu.add_command(label="About", command=self._show_about)
+    
     def _new_game(self, difficulty: str):
         """Start a new game with specified difficulty"""
         # Stop current timer
         if self.game_timer_id:
             self.root.after_cancel(self.game_timer_id)
             self.game_timer_id = None
+        
+        # Save current difficulty
+        self.current_difficulty = difficulty
+        self.leaderboard_manager.set_last_difficulty(difficulty)
         
         # Create new game board
         rows, cols, mines = GameBoard.DIFFICULTIES[difficulty]
@@ -507,17 +521,9 @@ class MinesweeperGUI:
         if self.game_board:
             difficulty = self._get_current_difficulty()
             self._new_game(difficulty)
-    
     def _get_current_difficulty(self) -> str:
         """Get the current difficulty level"""
-        if not self.game_board:
-            return 'beginner'
-        
-        size = (self.game_board.rows, self.game_board.cols, self.game_board.total_mines)
-        for diff, params in GameBoard.DIFFICULTIES.items():
-            if params == size:
-                return diff
-        return 'beginner'
+        return self.current_difficulty
     
     def _on_cell_click(self, row: int, col: int):
         """Handle left click on a cell"""
@@ -589,7 +595,6 @@ class MinesweeperGUI:
             
             # Schedule next update
             self.game_timer_id = self.root.after(1000, self._update_timer)
-    
     def _end_game(self):
         """Handle game end"""
         # Stop timer
@@ -597,8 +602,37 @@ class MinesweeperGUI:
             self.root.after_cancel(self.game_timer_id)
             self.game_timer_id = None
         
-        # No popup needed - the game state is shown through the smiley face
-        # and the revealed board state
+        # Check for new leaderboard entry if player won
+        if (self.game_board and 
+            self.game_board.game_state == GameState.WON and 
+            self.start_time):
+            
+            elapsed_time = int(time.time() - self.start_time)
+            
+            # Check if it's a top 10 time
+            if self.leaderboard_manager.is_top_10_time(self.current_difficulty, elapsed_time):
+                # Add to leaderboard
+                made_top_10 = self.leaderboard_manager.add_score(
+                    self.current_difficulty, 
+                    elapsed_time
+                )
+                
+                if made_top_10:
+                    # Find the rank of this score
+                    leaderboard = self.leaderboard_manager.get_leaderboard(self.current_difficulty)
+                    rank = next((i + 1 for i, entry in enumerate(leaderboard) 
+                               if entry.time_seconds == elapsed_time), 1)
+                    
+                    # Show congratulations after a short delay
+                    self.root.after(1000, lambda: congratulate_new_record(
+                        self.root, self.leaderboard_manager, 
+                        self.current_difficulty, elapsed_time, rank
+                    ))
+                    
+                    # Show leaderboard after congratulations
+                    self.root.after(3000, lambda: show_leaderboard(
+                        self.root, self.leaderboard_manager, self.current_difficulty
+                    ))
     
     def _show_help(self):
         """Show help dialog"""
@@ -633,6 +667,10 @@ Faithful recreation of the original game
 © 2025"""
         
         messagebox.showinfo("About Minesweeper", about_text)
+    
+    def _show_leaderboard(self):
+        """Show leaderboard dialog"""
+        show_leaderboard(self.root, self.leaderboard_manager, self.current_difficulty)
     
     def run(self):
         """Start the GUI main loop"""
