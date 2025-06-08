@@ -36,12 +36,11 @@ class LeaderboardEntry:
             date=data.get("date", ""),
             player_name=data.get("player_name", "Player")
         )
-    
     def format_time(self) -> str:
-        """Format time as MM:SS"""
+        """Format time as MM:SS (total seconds)"""
         minutes = self.time_seconds // 60
         seconds = self.time_seconds % 60
-        return f"{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d} ({self.time_seconds}s)"
 
 
 class LeaderboardManager:
@@ -197,11 +196,10 @@ class LeaderboardDialog:
     def __init__(self, parent, leaderboard_manager: LeaderboardManager, difficulty: str = None):
         self.leaderboard_manager = leaderboard_manager
         self.current_difficulty = difficulty or leaderboard_manager.get_last_difficulty()
-        
-        # Create dialog window
+          # Create dialog window
         self.dialog = Toplevel(parent)
         self.dialog.title("Leaderboard")
-        self.dialog.geometry("400x500")
+        self.dialog.geometry("450x500")
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -238,13 +236,12 @@ class LeaderboardDialog:
         # Leaderboard display
         list_frame = Frame(self.dialog)
         list_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        # Headers
+          # Headers
         header_frame = Frame(list_frame)
         header_frame.pack(fill="x", pady=(0, 5))
         
         Label(header_frame, text="Rank", font=("Arial", 10, "bold"), width=6).pack(side="left")
-        Label(header_frame, text="Time", font=("Arial", 10, "bold"), width=8).pack(side="left")
+        Label(header_frame, text="Time", font=("Arial", 10, "bold"), width=15).pack(side="left")
         Label(header_frame, text="Date", font=("Arial", 10, "bold"), width=12).pack(side="left")
         Label(header_frame, text="Player", font=("Arial", 10, "bold")).pack(side="left", fill="x", expand=True)
         
@@ -272,19 +269,18 @@ class LeaderboardDialog:
         self.listbox.delete(0, tk.END)
         
         leaderboard = self.leaderboard_manager.get_leaderboard(self.current_difficulty)
-        
         if not leaderboard:
             self.listbox.insert(tk.END, "                 No times recorded yet")
             return
-        
+            
         for i, entry in enumerate(leaderboard, 1):
-            # Format: "  1.   01:23   2024-12-07   Player"
+            # Format: "  1.   01:23 (83s)   2024-12-07   Player"
             rank = f"{i:2d}."
             time_str = entry.format_time()
             date_str = entry.date.split()[0] if ' ' in entry.date else entry.date[:10]
             player_str = entry.player_name[:15]  # Truncate if too long
             
-            line = f"  {rank:<4} {time_str:<8} {date_str:<12} {player_str}"
+            line = f"  {rank:<4} {time_str:<15} {date_str:<12} {player_str}"
             self.listbox.insert(tk.END, line)
 
 
@@ -296,7 +292,7 @@ def show_leaderboard(parent, leaderboard_manager: LeaderboardManager, difficulty
 def congratulate_new_record(parent, leaderboard_manager: LeaderboardManager, 
                           difficulty: str, time_seconds: int, rank: int):
     """Show congratulations for a new record"""
-    time_str = f"{time_seconds // 60:02d}:{time_seconds % 60:02d}"
+    time_str = f"{time_seconds // 60:02d}:{time_seconds % 60:02d} ({time_seconds}s)"
     
     if rank == 1:
         title = "🎉 NEW RECORD!"
