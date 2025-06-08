@@ -51,6 +51,10 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Test outputs and temporary files
+test_output/
+test_results/
+
 # Translations
 *.mo
 *.pot
@@ -161,6 +165,7 @@ cython_debug/
 # VS Code
 .vscode/
 *.code-workspace
+.copilot-instructions.md
 
 # Sublime Text
 *.sublime-project
@@ -216,18 +221,33 @@ logs/
 *.save
 *.log
 
-# AI model files (if training models)
+# AI model files and training outputs
 *.pkl
 *.joblib
 *.h5
 *.pb
+*.pth
+*.pt
+*.onnx
 models/
+models_cuda/
+demo_models/
 checkpoints/
+temp_benchmark/
 
-# Data files (if using large datasets)
+# Training and monitoring outputs
+*.json
+!requirements.json
+!package.json
+!tsconfig.json
+monitoring/
+gpu_benchmark_*.json
+training_plots.png
+demo_training_plots.png
+
+# Large data files (if using datasets)
 data/
 *.csv
-*.json
 *.xml
 *.xlsx
 *.xls
@@ -236,3 +256,28 @@ data/
 debug_output/
 screenshots/
 profiles/
+
+# ===========================================
+# Minesweeper AI Project Specific
+# ===========================================
+
+# AI Training Models and Outputs
+models/
+models_cuda/
+demo_models/
+temp_benchmark/
+*.pth
+*.pt
+*.onnx
+
+# Training Logs and Metrics
+training_plots.png
+demo_training_plots.png
+gpu_benchmark_*.json
+
+# Monitoring and Performance Data
+monitoring/
+
+# Configuration files with sensitive data (if any)
+config.local.json
+.env.local
