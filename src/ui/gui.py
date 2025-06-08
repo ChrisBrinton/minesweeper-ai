@@ -228,14 +228,14 @@ class CellButton(tk.Frame):
         # Define the base assets directory
         assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets')
         print(f"Loading images from: {assets_dir}")
-          
-        # Define image filenames to look for
+            # Define image filenames to look for
         image_files = {
             'hidden': 'hidden_cell.png',
             'empty': 'empty_cell.png',
             'mine': 'mine_cell.png',
             'flag': 'flag_cell.png',
             'mine_red': 'mine_red_cell.png',  # For clicked mine
+            'bad_flag': 'bad_flag_cell.png',  # For incorrectly flagged cells when game is lost
         }
         
         # Add numbered cells
@@ -367,18 +367,30 @@ class CellButton(tk.Frame):
                 if self._images.get('empty'):
                     self.label.config(image=self._images['empty'], text='')
                 else:
-                    self.label.config(text='', image='')
-                self.config(bg='#c0c0c0')
+                    self.label.config(text='', image='')                
+                    self.config(bg='#c0c0c0')
                 self.label.config(bg='#c0c0c0')
         elif cell.state == CellState.FLAGGED:
             # Configure frame for flagged state
             self.config(relief='raised', bd=1, bg='#c0c0c0')
             
-            # Use flag image if available, otherwise fallback to emoji
-            if self._images.get('flag'):
-                self.label.config(image=self._images['flag'], text='', bg='#c0c0c0')
+            # Check if this is an incorrectly flagged cell (game lost and not a mine)
+            is_bad_flag = (game_board and 
+                          game_board.game_state == GameState.LOST and 
+                          not cell.is_mine)
+            
+            if is_bad_flag:
+                # Use bad flag image for incorrectly flagged cells when game is lost
+                if self._images.get('bad_flag'):
+                    self.label.config(image=self._images['bad_flag'], text='', bg='#c0c0c0')
+                else:
+                    self.label.config(text='❌', image='', bg='#c0c0c0')
             else:
-                self.label.config(text='🚩', image='', bg='#c0c0c0')
+                # Use regular flag image
+                if self._images.get('flag'):
+                    self.label.config(image=self._images['flag'], text='', bg='#c0c0c0')
+                else:
+                    self.label.config(text='🚩', image='', bg='#c0c0c0')
         else:  # HIDDEN
             # Configure frame for hidden state
             self.config(relief='raised', bd=1, bg='#c0c0c0')
@@ -400,13 +412,13 @@ class MinesweeperGUI:
         
         # Leaderboard system
         self.leaderboard_manager = LeaderboardManager()
-        
-        # Game components
+          # Game components
         self.game_board: Optional[GameBoard] = None
         self.cell_buttons: List[List[CellButton]] = []
         self.start_time: Optional[float] = None
         self.game_timer_id: Optional[str] = None
         self.current_difficulty: str = 'beginner'
+        self.current_elapsed_time: int = 0  # Track current elapsed time for consistent leaderboard recording
         
         # GUI components
         self.mine_display: Optional[DigitalDisplay] = None
@@ -497,10 +509,10 @@ class MinesweeperGUI:
         # Reset displays
         self.mine_display.set_value(mines)
         self.timer_display.set_value(0)
-        
-        # Update smiley face state
+          # Update smiley face state
         self.smiley_button.set_state(GameState.READY)
         self.start_time = None
+        self.current_elapsed_time = 0  # Reset elapsed time tracking
         
         # OPTIMIZATION: Check if we can reuse existing buttons
         current_size = (len(self.cell_buttons), len(self.cell_buttons[0])) if self.cell_buttons else (0, 0)
@@ -577,8 +589,7 @@ class MinesweeperGUI:
         
         # Update smiley face
         self.smiley_button.set_state(self.game_board.game_state)
-        
-        # Update cell buttons
+          # Update cell buttons
         for row in range(self.game_board.rows):
             for col in range(self.game_board.cols):
                 cell = self.game_board.get_cell(row, col)
@@ -591,10 +602,12 @@ class MinesweeperGUI:
             self.game_board.game_state == GameState.PLAYING):
             
             elapsed = int(time.time() - self.start_time)
+            self.current_elapsed_time = elapsed  # Store the current elapsed time
             self.timer_display.set_value(min(elapsed, 999))  # Cap at 999
             
             # Schedule next update
             self.game_timer_id = self.root.after(1000, self._update_timer)
+    
     def _end_game(self):
         """Handle game end"""
         # Stop timer
@@ -607,7 +620,9 @@ class MinesweeperGUI:
             self.game_board.game_state == GameState.WON and 
             self.start_time):
             
-            elapsed_time = int(time.time() - self.start_time)
+            # Use the current elapsed time that was displayed on the timer
+            # instead of recalculating to avoid timing discrepancies
+            elapsed_time = self.current_elapsed_time
             
             # Check if it's a top 10 time
             if self.leaderboard_manager.is_top_10_time(self.current_difficulty, elapsed_time):
