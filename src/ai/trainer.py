@@ -224,12 +224,13 @@ class DQNTrainer:
                 loss = self._update_network()
                 if loss is not None:
                     self.losses.append(loss)
-            
             state = next_state
             
             if done:
                 break
-            won = info.get('game_state') == 'won'
+        
+        # Check if the episode was won (after the episode ends)
+        won = info.get('game_state') == 'won'
         return total_reward, steps, won
     
     def _update_network(self) -> Optional[float]:
