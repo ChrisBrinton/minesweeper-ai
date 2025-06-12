@@ -240,7 +240,7 @@ temp_benchmark/
 !requirements.json
 !package.json
 !tsconfig.json
-monitoring/
+monitoring/data/
 gpu_benchmark_*.json
 training_plots.png
 demo_training_plots.png
@@ -263,9 +263,6 @@ profiles/
 
 # AI Training Models and Outputs
 models/
-models_cuda/
-demo_models/
-temp_benchmark/
 *.pth
 *.pt
 *.onnx
@@ -274,9 +271,6 @@ temp_benchmark/
 training_plots.png
 demo_training_plots.png
 gpu_benchmark_*.json
-
-# Monitoring and Performance Data
-monitoring/
 
 # Configuration files with sensitive data (if any)
 config.local.json

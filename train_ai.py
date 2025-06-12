@@ -1,177 +1,561 @@
+#!/usr/bin/env python3
 """
-Main training script for Minesweeper AI
-Trains a DQN agent to play Minesweeper using the API framework
+Enhanced Beginner Training V2 with Parallel Evaluation - Resume Capability
+Resume from existing Enhanced V2 progress instead of restarting
 """
 
-import sys
 import os
-import argparse
 import json
-from datetime import datetime
+import torch
+import numpy as np
+import argparse
+from datetime import datetime, timedelta
+from src.ai.trainer import DQNTrainer
+from src.ai.environment import MinesweeperEnvironment
+from parallel_evaluation_optimized import enable_optimized_parallel_evaluation
+from lightweight_evaluation import enable_lightweight_parallel_evaluation, enable_sequential_evaluation_with_progress
 
-# Add src directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-
-from ai import create_trainer
-
+class EnhancedBeginnerTrainerV2Resume:
+    def __init__(self, num_eval_workers=None, evaluation_method="lightweight"):
+        self.target_win_rate = 0.50
+        self.original_save_dir = "models_beginner_enhanced_v2"  # Original V2 results
+        self.save_dir = "models_beginner_enhanced_v2_parallel_resume"  # New parallel results
+        self.num_eval_workers = num_eval_workers or max(1, os.cpu_count() - 2)
+        self.evaluation_method = evaluation_method
+        
+        print(f"🔄 Enhanced Trainer V2 - RESUME from existing progress")
+        print(f"   📂 Original results: {self.original_save_dir}")
+        print(f"   💾 New parallel results: {self.save_dir}")
+        print(f"   🖥️  Evaluation method: {evaluation_method}")
+        if evaluation_method != "sequential":
+            print(f"   🖥️  Evaluation workers: {self.num_eval_workers}")
+        print(f"   🎯 Target: {self.target_win_rate*100:.0f}% win rate")
+        
+        # Training phases configuration
+        self.training_phases = [
+            {
+                'name': 'Foundation',
+                'episodes': 15000,
+                'description': 'Extended foundation learning with stable parameters',
+                'learning_rate': 0.001,
+                'epsilon_start': 0.9,
+                'epsilon_end': 0.3,
+                'batch_size': 64,
+                'memory_size': 50000,
+                'eval_frequency': 100,
+                'eval_episodes': 100
+            },
+            {
+                'name': 'Stabilization', 
+                'episodes': 15000,
+                'description': 'Gradual parameter adjustment with knowledge preservation',
+                'learning_rate': 0.0008,
+                'epsilon_start': 0.3,
+                'epsilon_end': 0.15,
+                'batch_size': 96,
+                'memory_size': 75000,
+                'eval_frequency': 100,
+                'eval_episodes': 100
+            },
+            {
+                'name': 'Mastery',
+                'episodes': 15000,
+                'description': 'Fine-tuning with preserved knowledge',
+                'learning_rate': 0.0005,
+                'epsilon_start': 0.15,
+                'epsilon_end': 0.05,
+                'batch_size': 128,
+                'memory_size': 100000,
+                'eval_frequency': 100,
+                'eval_episodes': 100
+            }        ]
+        
+        os.makedirs(self.save_dir, exist_ok=True)
+        
+    def find_latest_checkpoint(self):
+        """Find the latest checkpoint from both resume and original Enhanced V2 training"""
+        
+        latest_checkpoint_info = None
+        
+        # Phase priority: Mastery > Stabilization > Foundation
+        phase_priority = {"Mastery": 3, "Stabilization": 2, "Foundation": 1}
+        
+        # Helper function to check a directory for checkpoints
+        def check_directory_for_checkpoints(base_dir, source_type):
+            nonlocal latest_checkpoint_info
+            
+            if not os.path.exists(base_dir):
+                return
+            
+            print(f"🔍 Checking {source_type}: {base_dir}")
+            
+            for item in os.listdir(base_dir):
+                item_path = os.path.join(base_dir, item)
+                if not os.path.isdir(item_path):
+                    continue
+                
+                # Parse phase and timestamp from directory name
+                phase_name = None
+                dir_timestamp = None
+                
+                if item.startswith("Foundation_"):
+                    phase_name = "Foundation"
+                    if "resumed_" in item:
+                        timestamp_part = item.split("resumed_")[-1]
+                        try:
+                            dir_timestamp = datetime.strptime(timestamp_part, "%Y%m%d_%H%M%S")
+                        except ValueError:
+                            pass
+                    elif source_type == "original":
+                        # Original foundation - use modification time as fallback
+                        dir_timestamp = datetime.fromtimestamp(os.path.getmtime(item_path))
+                
+                elif item.startswith("Stabilization_"):
+                    phase_name = "Stabilization"
+                    if "resumed_" in item:
+                        timestamp_part = item.split("resumed_")[-1]
+                        try:
+                            dir_timestamp = datetime.strptime(timestamp_part, "%Y%m%d_%H%M%S")
+                        except ValueError:
+                            pass
+                    elif source_type == "original":
+                        # Original stabilization - use modification time as fallback
+                        dir_timestamp = datetime.fromtimestamp(os.path.getmtime(item_path))
+                
+                elif item.startswith("Mastery_"):
+                    phase_name = "Mastery"
+                    if "resumed_" in item:
+                        timestamp_part = item.split("resumed_")[-1]
+                        try:
+                            dir_timestamp = datetime.strptime(timestamp_part, "%Y%m%d_%H%M%S")
+                        except ValueError:
+                            pass
+                    elif source_type == "original":
+                        # Original mastery - use modification time as fallback
+                        dir_timestamp = datetime.fromtimestamp(os.path.getmtime(item_path))
+                
+                if not phase_name:
+                    continue
+                
+                # Find the latest checkpoint in this directory
+                checkpoint_info = self._find_checkpoint_in_directory(item_path, phase_name, source_type)
+                if not checkpoint_info:
+                    continue
+                
+                # Use directory timestamp if available, otherwise checkpoint timestamp
+                effective_timestamp = dir_timestamp or checkpoint_info.get('timestamp')
+                
+                print(f"   📁 {phase_name} ({source_type}): Episode {checkpoint_info['episodes_completed']:,}")
+                if effective_timestamp:
+                    print(f"      ⏰ {effective_timestamp}")
+                
+                # Check if this is the latest based on phase priority and episode number
+                is_better = False
+                if latest_checkpoint_info is None:
+                    is_better = True
+                else:
+                    current_phase_priority = phase_priority.get(phase_name, 0)
+                    latest_phase_priority = phase_priority.get(latest_checkpoint_info['phase'], 0)
+                    
+                    if current_phase_priority > latest_phase_priority:
+                        # Higher priority phase (e.g., Stabilization > Foundation)
+                        is_better = True
+                    elif current_phase_priority == latest_phase_priority:
+                        # Same phase - compare episode numbers
+                        if checkpoint_info['episodes_completed'] > latest_checkpoint_info['episodes_completed']:
+                            is_better = True
+                        elif (checkpoint_info['episodes_completed'] == latest_checkpoint_info['episodes_completed'] 
+                              and effective_timestamp and latest_checkpoint_info.get('timestamp')
+                              and effective_timestamp > latest_checkpoint_info['timestamp']):
+                            # Same episode - use timestamp as tiebreaker
+                            is_better = True
+                
+                if is_better:
+                    latest_checkpoint_info = checkpoint_info
+                    print(f"      🌟 LATEST so far")
+        
+        # Check parallel resume directory first (more recent)
+        check_directory_for_checkpoints(self.save_dir, "parallel resume")
+        
+        # Check original directory
+        check_directory_for_checkpoints(self.original_save_dir, "original")
+        
+        if latest_checkpoint_info:
+            source = "parallel resume" if self.save_dir in latest_checkpoint_info['phase_dir'] else "original"
+            print(f"\n✅ Using LATEST checkpoint from {source}")
+            print(f"   📂 Phase: {latest_checkpoint_info['phase']}")
+            print(f"   📊 Episode: {latest_checkpoint_info['episodes_completed']:,}")
+            print(f"   💾 Model: {latest_checkpoint_info['checkpoint_path']}")
+            if latest_checkpoint_info.get('timestamp'):
+                print(f"   ⏰ Timestamp: {latest_checkpoint_info['timestamp']}")
+        else:
+            print("\n❌ No existing checkpoints found in either directory")
+        
+        return latest_checkpoint_info
+    
+    def _find_checkpoint_in_directory(self, phase_dir, phase_name, source_type):
+        """Find the latest checkpoint file in a specific phase directory"""
+        
+        # Look for checkpoint files
+        checkpoint_files = []
+        if os.path.exists(phase_dir):
+            for f in os.listdir(phase_dir):
+                if f.startswith("dqn_episode_") and f.endswith(".pth"):
+                    checkpoint_files.append(f)
+        
+        # If we have episode checkpoints, use the latest one
+        if checkpoint_files:
+            episodes = [int(f.split('_episode_')[1].split('.pth')[0]) for f in checkpoint_files]
+            latest_episode = max(episodes)
+            latest_checkpoint = os.path.join(phase_dir, f"dqn_episode_{latest_episode}.pth")
+            
+            return {
+                'phase': phase_name,
+                'checkpoint_path': latest_checkpoint,
+                'metrics_path': os.path.join(phase_dir, "training_metrics.json"),
+                'episodes_completed': latest_episode,
+                'phase_dir': phase_dir,
+                'timestamp': datetime.fromtimestamp(os.path.getmtime(latest_checkpoint))
+            }
+        
+        # Check for final model (completed phase)
+        final_model = os.path.join(phase_dir, "dqn_final.pth")
+        if os.path.exists(final_model):
+            # Determine episodes based on phase
+            episodes_map = {
+                'Foundation': 15000,
+                'Stabilization': 15000,
+                'Mastery': 15000
+            }
+            
+            return {
+                'phase': phase_name,
+                'checkpoint_path': final_model,
+                'metrics_path': os.path.join(phase_dir, "training_metrics.json"),
+                'episodes_completed': episodes_map.get(phase_name, 15000),
+                'phase_dir': phase_dir,
+                'timestamp': datetime.fromtimestamp(os.path.getmtime(final_model))
+            }
+        
+        return None
+    
+    def load_checkpoint_state(self, checkpoint_info):
+        """Load the trainer state from checkpoint"""
+        
+        checkpoint_path = checkpoint_info['checkpoint_path']
+        print(f"📂 Loading checkpoint: {checkpoint_path}")
+        
+        # Load the checkpoint
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        
+        # Extract training state
+        training_state = {
+            'episode': checkpoint.get('episode', 0),
+            'epsilon': checkpoint.get('epsilon', 0.15),  # Default for stabilization
+            'total_steps': checkpoint.get('total_steps', 0)
+        }
+        
+        print(f"   📊 Episode: {training_state['episode']}")
+        print(f"   🎲 Epsilon: {training_state['epsilon']:.3f}")
+        print(f"   📈 Total steps: {training_state['total_steps']:,}")
+        
+        return checkpoint, training_state
+    
+    def train_remaining_phases(self, resume_info):
+        """Continue training from where we left off"""
+        
+        phase_name = resume_info['phase']
+        episodes_completed = resume_info['episodes_completed']
+        
+        print(f"🔄 Resuming from {phase_name} phase")
+        print(f"   ✅ Episodes completed: {episodes_completed:,}")
+        
+        # Load checkpoint state
+        checkpoint, training_state = self.load_checkpoint_state(resume_info)
+        
+        all_results = []
+        best_overall_win_rate = 0.0
+        best_model_path = None
+        start_time = datetime.now()
+        
+        # Determine which phases to run
+        phase_start_index = 0
+        remaining_episodes = 0
+        
+        if phase_name == "Foundation":
+            # Start from Stabilization
+            phase_start_index = 1
+            print("   ➡️  Starting Stabilization phase")
+        elif phase_name == "Stabilization":
+            # Continue Stabilization, then do Mastery
+            phase_start_index = 1
+            remaining_episodes = 15000 - episodes_completed  # How many left in Stabilization
+            print(f"   ➡️  Continuing Stabilization ({remaining_episodes:,} episodes remaining)")
+        else:
+            print(f"❌ Unknown phase: {phase_name}")
+            return None
+        
+        # Process remaining phases
+        for i in range(phase_start_index, len(self.training_phases)):
+            phase = self.training_phases[i].copy()
+            
+            # Adjust episodes for partially completed phase
+            if i == phase_start_index and remaining_episodes > 0:
+                phase['episodes'] = remaining_episodes
+                print(f"   📝 Adjusted {phase['name']} to {remaining_episodes:,} remaining episodes")
+            
+            try:
+                # Create trainer for this phase
+                env = MinesweeperEnvironment(rows=9, cols=9, mines=10)
+                
+                trainer_config = {
+                    'learning_rate': phase['learning_rate'],
+                    'batch_size': phase['batch_size'],
+                    'memory_size': phase['memory_size'],
+                    'epsilon_start': training_state['epsilon'],  # Continue from current epsilon
+                    'epsilon_end': phase['epsilon_end'],
+                    'epsilon_decay': 0.995,
+                    'target_update_freq': 1000,
+                    'max_episodes': phase['episodes'],
+                    'eval_freq': phase['eval_frequency'],
+                    'eval_episodes': phase['eval_episodes'],                    'save_freq': 500
+                }
+                
+                trainer = DQNTrainer(env, trainer_config)
+                
+                # Enable appropriate evaluation method
+                if self.evaluation_method == "optimized":
+                    trainer = enable_optimized_parallel_evaluation(trainer, num_workers=self.num_eval_workers)
+                elif self.evaluation_method == "lightweight":
+                    trainer = enable_lightweight_parallel_evaluation(trainer, num_threads=self.num_eval_workers)
+                elif self.evaluation_method == "sequential":
+                    trainer = enable_sequential_evaluation_with_progress(trainer)
+                else:
+                    print(f"⚠️ Unknown evaluation method: {self.evaluation_method}, using lightweight")
+                    trainer = enable_lightweight_parallel_evaluation(trainer, num_threads=self.num_eval_workers)
+                
+                # Load the model weights
+                trainer.q_network.load_state_dict(checkpoint['q_network_state_dict'])
+                trainer.target_network.load_state_dict(checkpoint['target_network_state_dict'])
+                trainer.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                
+                # Set training state
+                trainer.episode = training_state['episode']
+                trainer.epsilon = training_state['epsilon']
+                trainer.total_steps = training_state['total_steps']
+                
+                print(f"\n🚀 Starting {phase['name']} phase with parallel evaluation")
+                print(f"   📋 {phase['description']}")
+                print(f"   🎯 Episodes: {phase['episodes']:,}")
+                print(f"   📚 Learning Rate: {phase['learning_rate']}")
+                print(f"   🎲 Epsilon: {trainer.epsilon:.3f} → {phase['epsilon_end']}")
+                print(f"   📦 Batch Size: {phase['batch_size']}")
+                print(f"   🖥️  Eval Workers: {self.num_eval_workers}")
+                
+                # Create phase directory
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                phase_dir = os.path.join(self.save_dir, f"{phase['name']}_resumed_{timestamp}")
+                os.makedirs(phase_dir, exist_ok=True)
+                
+                # Train
+                phase_start_time = datetime.now()
+                results = trainer.train(save_dir=phase_dir)
+                phase_end_time = datetime.now()
+                
+                training_time = phase_end_time - phase_start_time
+                print(f"   ⏱️  Phase training time: {training_time}")
+                
+                # Save model
+                model_path = os.path.join(phase_dir, "model.pth")
+                torch.save(trainer.q_network.state_dict(), model_path)
+                
+                # Results tracking
+                phase_results = {
+                    'phase_name': phase['name'],
+                    'resumed_from_episode': training_state['episode'],
+                    'episodes_trained': phase['episodes'],
+                    'timestamp': timestamp,
+                    'training_time': str(training_time),
+                    'best_win_rate': float(max(results['eval_win_rates']) if results['eval_win_rates'] else 0.0),
+                    'final_win_rate': float(results['eval_win_rates'][-1] if results['eval_win_rates'] else 0.0),
+                    'best_eval_reward': float(max(results['eval_rewards']) if results['eval_rewards'] else 0.0),
+                    'final_eval_reward': float(results['eval_rewards'][-1] if results['eval_rewards'] else 0.0),
+                    'model_path': model_path,
+                    'training_config': phase,
+                    'parallel_eval_workers': self.num_eval_workers
+                }
+                
+                all_results.append(phase_results)
+                
+                # Track best performance
+                if phase_results['best_win_rate'] > best_overall_win_rate:
+                    best_overall_win_rate = phase_results['best_win_rate']
+                    best_model_path = model_path
+                    print(f"   🌟 NEW BEST: {best_overall_win_rate:.3f} ({best_overall_win_rate*100:.1f}%)")
+                
+                print(f"   ✅ {phase['name']} completed!")
+                print(f"   📊 Best win rate: {phase_results['best_win_rate']:.3f} ({phase_results['best_win_rate']*100:.1f}%)")
+                print(f"   📊 Final win rate: {phase_results['final_win_rate']:.3f} ({phase_results['final_win_rate']*100:.1f}%)")
+                
+                # Check if target achieved
+                if best_overall_win_rate >= self.target_win_rate:
+                    print(f"\n🎉 TARGET ACHIEVED! {best_overall_win_rate*100:.1f}% >= {self.target_win_rate*100:.1f}%")
+                    break
+                
+                # Update checkpoint for next phase
+                checkpoint = {
+                    'q_network_state_dict': trainer.q_network.state_dict(),
+                    'target_network_state_dict': trainer.target_network.state_dict(),
+                    'optimizer_state_dict': trainer.optimizer.state_dict(),
+                    'episode': trainer.episode,
+                    'epsilon': trainer.epsilon,
+                    'total_steps': trainer.total_steps
+                }
+                training_state = {
+                    'episode': trainer.episode,
+                    'epsilon': phase['epsilon_end'],  # Start next phase at this epsilon
+                    'total_steps': trainer.total_steps
+                }
+                remaining_episodes = 0  # Reset for next phase
+                
+            except Exception as e:
+                print(f"\n❌ Error in {phase['name']} phase: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+          # Save final results
+        end_time = datetime.now()
+        total_duration = end_time - start_time
+        
+        # Convert datetime objects to strings for JSON serialization
+        def make_json_safe(obj):
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            elif isinstance(obj, timedelta):
+                return str(obj)
+            elif isinstance(obj, dict):
+                return {k: make_json_safe(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [make_json_safe(item) for item in obj]
+            else:
+                return obj
+        
+        final_results = {
+            'version': 'v2_parallel_resume',
+            'resumed_from': make_json_safe(resume_info),
+            'training_completed': end_time.isoformat(),
+            'training_duration': str(total_duration),
+            'target_win_rate': float(self.target_win_rate),
+            'best_win_rate': float(best_overall_win_rate),
+            'best_model_path': str(best_model_path) if best_model_path else None,
+            'target_achieved': bool(best_overall_win_rate >= self.target_win_rate),
+            'phases_completed': int(len(all_results)),
+            'eval_workers_used': self.num_eval_workers,
+            'all_phase_results': make_json_safe(all_results)
+        }
+        
+        results_path = os.path.join(self.save_dir, "resume_training_results.json")
+        with open(results_path, 'w') as f:
+            json.dump(final_results, f, indent=2)
+        
+        # Print summary
+        print(f"\n🎯 ENHANCED TRAINING V2 RESUME SUMMARY")
+        print("=" * 75)
+        print(f"⏱️  Total Duration: {total_duration}")
+        print(f"🔄 Resumed from: {resume_info['phase']} Episode {resume_info['episodes_completed']:,}")
+        print(f"🏆 Best Achieved: {best_overall_win_rate:.3f} ({best_overall_win_rate*100:.1f}%)")
+        print(f"✅ Target Achieved: {'YES' if best_overall_win_rate >= self.target_win_rate else 'NO'}")
+        print(f"📊 Additional Phases: {len(all_results)}")
+        print(f"🖥️  Evaluation Workers: {self.num_eval_workers}")
+        print(f"💾 Results: {results_path}")
+        
+        return final_results
+    
+    def run_resume_training(self):
+        """Resume training from existing Enhanced V2 progress"""
+        
+        print("🔄 ENHANCED BEGINNER TRAINING V2 - RESUME MODE")
+        print("=" * 75)
+        print(f"Looking for existing Enhanced V2 progress...")
+        
+        # Find existing checkpoint
+        resume_info = self.find_latest_checkpoint()
+        
+        if not resume_info:
+            print("❌ No existing progress found. Please run the original Enhanced V2 training first.")
+            return None
+        
+        print(f"✅ Found checkpoint in {resume_info['phase']} phase")
+        print(f"   Episodes completed: {resume_info['episodes_completed']:,}")
+        
+        # Continue training with parallel evaluation
+        results = self.train_remaining_phases(resume_info)
+        
+        if results and results['target_achieved']:
+            print(f"\n🎉 SUCCESS! Achieved {results['best_win_rate']*100:.1f}% win rate!")
+            print(f"🏆 Best model: {results['best_model_path']}")
+        else:
+            win_rate = results['best_win_rate'] if results else 0.0
+            print(f"\n📈 Progress: {win_rate*100:.1f}% (target: {self.target_win_rate*100:.1f}%)")
+        
+        return results
 
 def main():
-    """Main training function"""
-    parser = argparse.ArgumentParser(description='Train Minesweeper AI using DQN')
-    
-    # Game settings
-    parser.add_argument('--difficulty', type=str, default='beginner',
-                       choices=['beginner', 'intermediate', 'expert'],
-                       help='Game difficulty level')
-    parser.add_argument('--rows', type=int, help='Custom board height')
-    parser.add_argument('--cols', type=int, help='Custom board width')
-    parser.add_argument('--mines', type=int, help='Custom number of mines')
-    
-    # Training settings
-    parser.add_argument('--episodes', type=int, default=5000,
-                       help='Number of training episodes')
-    parser.add_argument('--lr', type=float, default=1e-4,
-                       help='Learning rate')
-    parser.add_argument('--batch-size', type=int, default=32,
-                       help='Batch size for training')
-    parser.add_argument('--gamma', type=float, default=0.99,
-                       help='Discount factor')
-    parser.add_argument('--epsilon-start', type=float, default=1.0,
-                       help='Initial exploration rate')
-    parser.add_argument('--epsilon-end', type=float, default=0.01,
-                       help='Final exploration rate')
-    parser.add_argument('--epsilon-decay', type=float, default=0.995,
-                       help='Exploration decay rate')
-    parser.add_argument('--memory-size', type=int, default=10000,
-                       help='Replay buffer size')
-    parser.add_argument('--target-update-freq', type=int, default=100,
-                       help='Target network update frequency')
-    
-    # Evaluation and saving
-    parser.add_argument('--eval-freq', type=int, default=100,
-                       help='Evaluation frequency')
-    parser.add_argument('--eval-episodes', type=int, default=10,
-                       help='Number of evaluation episodes')
-    parser.add_argument('--save-freq', type=int, default=500,
-                       help='Model save frequency')
-    parser.add_argument('--save-dir', type=str, default='trained_models',
-                       help='Directory to save models')
-    
-    # Resume training
-    parser.add_argument('--resume', type=str,
-                       help='Path to model checkpoint to resume from')
-    
-    # Other options
-    parser.add_argument('--seed', type=int, default=42,
-                       help='Random seed')
-    parser.add_argument('--no-plot', action='store_true',
-                       help='Skip plotting training metrics')
+    parser = argparse.ArgumentParser(description='Resume Enhanced Beginner Training V2 with Parallel Evaluation')
+    parser.add_argument('--workers', type=int, default=None, 
+                       help='Number of evaluation workers (default: CPU cores - 2)')
+    parser.add_argument('--eval-method', choices=['optimized', 'lightweight', 'sequential'], 
+                       default='lightweight', help='Evaluation method to use')
+    parser.add_argument('--verbose', action='store_true',
+                       help='Enable verbose output')
     
     args = parser.parse_args()
     
-    # Set random seed
-    import torch
-    import numpy as np
-    import random
+    # Setup evaluation workers
+    cpu_cores = os.cpu_count()
     
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    random.seed(args.seed)
-    
-    # Create training configuration
-    config = {
-        'learning_rate': args.lr,
-        'batch_size': args.batch_size,
-        'gamma': args.gamma,
-        'epsilon_start': args.epsilon_start,
-        'epsilon_end': args.epsilon_end,
-        'epsilon_decay': args.epsilon_decay,
-        'memory_size': args.memory_size,
-        'target_update_freq': args.target_update_freq,
-        'max_episodes': args.episodes,
-        'eval_freq': args.eval_freq,
-        'eval_episodes': args.eval_episodes,
-        'save_freq': args.save_freq
-    }
-    
-    # Create trainer
-    if args.rows and args.cols and args.mines:
-        # Custom board size
-        from ai.environment import MinesweeperEnvironment
-        from ai.trainer import DQNTrainer
-        
-        env = MinesweeperEnvironment(args.rows, args.cols, args.mines)
-        trainer = DQNTrainer(env, config)
-        
-        difficulty_str = f"{args.rows}x{args.cols}_{args.mines}mines"
+    if args.workers:
+        eval_workers = args.workers
+        print(f"🖥️  System: {cpu_cores} CPU cores detected")
+        print(f"🚀 Using {eval_workers} workers (user specified)")
     else:
-        # Standard difficulty
-        trainer = create_trainer(args.difficulty, config)
-        difficulty_str = args.difficulty
+        # Default based on evaluation method
+        if args.eval_method == "sequential":
+            eval_workers = 1
+        elif args.eval_method == "lightweight":
+            eval_workers = min(8, max(2, cpu_cores // 2))  # Conservative for threading
+        else:  # optimized
+            eval_workers = max(1, cpu_cores - 2)
+        
+        print(f"🖥️  System: {cpu_cores} CPU cores detected")
+        print(f"🚀 Using {eval_workers} workers (auto for {args.eval_method})")
     
-    # Create save directory with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = os.path.join(args.save_dir, f"{difficulty_str}_{timestamp}")
-    os.makedirs(save_dir, exist_ok=True)
+    # Validate worker count
+    if args.eval_method != "sequential":
+        if eval_workers > cpu_cores:
+            print(f"⚠️  Warning: {eval_workers} workers > {cpu_cores} CPU cores")
+            print(f"   This may cause oversubscription and reduced performance")
+        elif eval_workers > cpu_cores * 0.8:
+            print(f"💡 Using {eval_workers}/{cpu_cores} cores (high utilization)")
     
-    # Save configuration
-    config_path = os.path.join(save_dir, "config.json")
-    with open(config_path, 'w') as f:
-        json.dump(vars(args), f, indent=2)
+    trainer = EnhancedBeginnerTrainerV2Resume(
+        num_eval_workers=eval_workers,
+        evaluation_method=args.eval_method
+    )
+    results = trainer.run_resume_training()
     
-    print(f"Training configuration saved to: {config_path}")
-    
-    # Resume from checkpoint if specified
-    if args.resume:
-        trainer.load_model(args.resume)
-        print(f"Resumed training from: {args.resume}")
-    
-    # Train the agent
-    try:
-        print(f"Starting training...")
-        print(f"Difficulty: {difficulty_str}")
-        print(f"Episodes: {args.episodes}")
-        print(f"Save directory: {save_dir}")
+    if results:
+        if results['target_achieved']:
+            print(f"\n🎯 TARGET ACHIEVED with {args.eval_method} evaluation!")
+        else:
+            print(f"\n📊 Training resumed with {args.eval_method} evaluation")
         
-        metrics = trainer.train(save_dir)
-        
-        print(f"Training completed!")
-        print(f"Models saved to: {save_dir}")
-        
-        # Final evaluation
-        print("Running final evaluation...")
-        final_reward, final_win_rate = trainer._evaluate()
-        print(f"Final evaluation - Avg Reward: {final_reward:.2f}, Win Rate: {final_win_rate:.3f}")
-        
-        # Plot training metrics
-        if not args.no_plot:
-            try:
-                plot_path = os.path.join(save_dir, "training_plots.png")
-                trainer.plot_training_metrics(plot_path)
-            except Exception as e:
-                print(f"Could not save training plots: {e}")
-        
-        # Print summary
-        print("\n" + "="*50)
-        print("TRAINING SUMMARY")
-        print("="*50)
-        print(f"Difficulty: {difficulty_str}")
-        print(f"Episodes trained: {len(metrics['training_rewards'])}")
-        print(f"Final average reward (last 100): {np.mean(metrics['training_rewards'][-100:]):.2f}")
-        print(f"Final win rate (last 100): {np.mean(metrics['training_wins'][-100:]):.3f}")
-        print(f"Best evaluation reward: {max(metrics['eval_rewards']) if metrics['eval_rewards'] else 'N/A'}")
-        print(f"Best evaluation win rate: {max(metrics['eval_win_rates']) if metrics['eval_win_rates'] else 'N/A'}")
-        print(f"Models saved to: {save_dir}")
-        
-    except KeyboardInterrupt:
-        print("\nTraining interrupted by user")
-        print("Saving current model...")
-        trainer.save_model(os.path.join(save_dir, "dqn_interrupted.pth"))
-    except Exception as e:
-        print(f"Error during training: {e}")
-        import traceback
-        traceback.print_exc()
-
+        # Performance summary
+        if 'all_phase_results' in results:
+            total_episodes = sum(r.get('episodes_trained', 0) for r in results['all_phase_results'])
+            print(f"📈 Additional episodes trained: {total_episodes:,}")
+    else:
+        print(f"\n❌ Resume training failed")
 
 if __name__ == "__main__":
     main()
