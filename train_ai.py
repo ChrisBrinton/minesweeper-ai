@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced Beginner Training V2 with Parallel Evaluation - Resume Capability
-Resume from existing Enhanced V2 progress instead of restarting
+Minesweeper AI Training - Primary Entry Point
+Provides comprehensive training capabilities with multiple evaluation methods
 """
 
 import os
@@ -12,14 +12,17 @@ import argparse
 from datetime import datetime, timedelta
 from src.ai.trainer import DQNTrainer
 from src.ai.environment import MinesweeperEnvironment
-from parallel_evaluation_optimized import enable_optimized_parallel_evaluation
-from lightweight_evaluation import enable_lightweight_parallel_evaluation, enable_sequential_evaluation_with_progress
+from evaluation import (
+    enable_optimized_parallel_evaluation,
+    enable_lightweight_parallel_evaluation, 
+    enable_sequential_evaluation_with_progress
+)
 
 class EnhancedBeginnerTrainerV2Resume:
-    def __init__(self, num_eval_workers=None, evaluation_method="lightweight"):
-        self.target_win_rate = 0.50
+    def __init__(self, num_eval_workers=None, evaluation_method="lightweight", target_win_rate=0.50, save_dir=None):
+        self.target_win_rate = target_win_rate
         self.original_save_dir = "models_beginner_enhanced_v2"  # Original V2 results
-        self.save_dir = "models_beginner_enhanced_v2_parallel_resume"  # New parallel results
+        self.save_dir = save_dir or "models_beginner_enhanced_v2_parallel_resume"  # New parallel results
         self.num_eval_workers = num_eval_workers or max(1, os.cpu_count() - 2)
         self.evaluation_method = evaluation_method
         
@@ -501,16 +504,54 @@ class EnhancedBeginnerTrainerV2Resume:
         return results
 
 def main():
-    parser = argparse.ArgumentParser(description='Resume Enhanced Beginner Training V2 with Parallel Evaluation')
+    parser = argparse.ArgumentParser(description='Minesweeper AI Training - Primary Entry Point')
+    
+    # Training mode selection
+    parser.add_argument('--mode', choices=['resume', 'new', 'benchmark'], default='resume',
+                       help='Training mode: resume from checkpoint, start new training, or benchmark evaluation methods')
+    
+    # Evaluation settings
     parser.add_argument('--workers', type=int, default=None, 
-                       help='Number of evaluation workers (default: CPU cores - 2)')
+                       help='Number of evaluation workers (default: auto-detected based on method)')
     parser.add_argument('--eval-method', choices=['optimized', 'lightweight', 'sequential'], 
                        default='lightweight', help='Evaluation method to use')
+    
+    # Training settings
+    parser.add_argument('--difficulty', choices=['beginner', 'intermediate', 'expert'], 
+                       default='beginner', help='Game difficulty level')
+    parser.add_argument('--episodes', type=int, default=None,
+                       help='Number of episodes to train (default: depends on mode)')
+    parser.add_argument('--target-win-rate', type=float, default=0.50,
+                       help='Target win rate to achieve (default: 0.50)')
+    
+    # Output and debugging
+    parser.add_argument('--save-dir', type=str, default=None,
+                       help='Directory to save models and results')
     parser.add_argument('--verbose', action='store_true',
                        help='Enable verbose output')
     
     args = parser.parse_args()
     
+    print("🤖 MINESWEEPER AI TRAINING")
+    print("=" * 50)
+    print(f"Mode: {args.mode}")
+    print(f"Difficulty: {args.difficulty}")
+    print(f"Evaluation: {args.eval_method}")
+    if args.eval_method != "sequential":
+        print(f"Workers: {args.workers or 'auto'}")
+    print()
+    
+    # Route to appropriate training mode
+    if args.mode == 'resume':
+        run_resume_training(args)
+    elif args.mode == 'new':
+        run_new_training(args)
+    elif args.mode == 'benchmark':
+        run_benchmark(args)
+
+
+def run_resume_training(args):
+    """Resume training from existing Enhanced V2 progress"""
     # Setup evaluation workers
     cpu_cores = os.cpu_count()
     
@@ -540,7 +581,9 @@ def main():
     
     trainer = EnhancedBeginnerTrainerV2Resume(
         num_eval_workers=eval_workers,
-        evaluation_method=args.eval_method
+        evaluation_method=args.eval_method,
+        target_win_rate=args.target_win_rate,
+        save_dir=args.save_dir
     )
     results = trainer.run_resume_training()
     
@@ -556,6 +599,93 @@ def main():
             print(f"📈 Additional episodes trained: {total_episodes:,}")
     else:
         print(f"\n❌ Resume training failed")
+
+
+def run_new_training(args):
+    """Start new training from scratch"""
+    print("🆕 Starting new training from scratch...")
+    
+    # Create trainer
+    from src.ai.trainer import create_trainer
+    
+    trainer = create_trainer(
+        difficulty=args.difficulty,
+        config={
+            'max_episodes': args.episodes or 10000,
+            'eval_episodes': 100,
+            'eval_freq': 100
+        }
+    )
+    
+    # Setup evaluation method
+    cpu_cores = os.cpu_count()
+    if args.workers:
+        eval_workers = args.workers
+    else:
+        if args.eval_method == "sequential":
+            eval_workers = 1
+        elif args.eval_method == "lightweight":
+            eval_workers = min(8, max(2, cpu_cores // 2))
+        else:  # optimized
+            eval_workers = max(1, cpu_cores - 2)
+    
+    # Enable evaluation method
+    if args.eval_method == "optimized":
+        trainer = enable_optimized_parallel_evaluation(trainer, num_workers=eval_workers)
+    elif args.eval_method == "lightweight":
+        trainer = enable_lightweight_parallel_evaluation(trainer, num_threads=eval_workers)
+    elif args.eval_method == "sequential":
+        trainer = enable_sequential_evaluation_with_progress(trainer)
+    
+    # Set save directory
+    save_dir = args.save_dir or f"models_{args.difficulty}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    print(f"💾 Saving to: {save_dir}")
+    print(f"🎯 Target episodes: {trainer.config['max_episodes']:,}")
+    print(f"📊 Evaluation method: {args.eval_method}")
+    if args.eval_method != "sequential":
+        print(f"🖥️  Workers: {eval_workers}")
+    
+    # Train
+    results = trainer.train(save_dir=save_dir)
+    
+    # Report results
+    if results['eval_win_rates']:
+        best_win_rate = max(results['eval_win_rates'])
+        final_win_rate = results['eval_win_rates'][-1]
+        
+        print(f"\n🏆 TRAINING COMPLETED")
+        print(f"Best win rate: {best_win_rate:.3f} ({best_win_rate*100:.1f}%)")
+        print(f"Final win rate: {final_win_rate:.3f} ({final_win_rate*100:.1f}%)")
+        print(f"Target achieved: {'YES' if best_win_rate >= args.target_win_rate else 'NO'}")
+    
+    return results
+
+
+def run_benchmark(args):
+    """Benchmark different evaluation methods"""
+    print("🏁 Benchmarking evaluation methods...")
+    
+    # Create a basic trainer for benchmarking
+    from src.ai.trainer import create_trainer
+    
+    trainer = create_trainer(
+        difficulty=args.difficulty,
+        config={'eval_episodes': 50}  # Use fewer episodes for benchmarking
+    )
+    
+    # Train a bit first so we have a reasonable model to evaluate
+    print("🔧 Training model briefly for benchmark...")
+    trainer.train_episode_count = 0  # Reset episode count
+    for _ in range(100):  # Quick training
+        trainer._train_episode()
+        trainer.train_episode_count += 1
+    
+    # Run benchmark
+    from evaluation import benchmark_evaluation_methods
+    results = benchmark_evaluation_methods(trainer, num_episodes=args.episodes or 50)
+    
+    return results
 
 if __name__ == "__main__":
     main()

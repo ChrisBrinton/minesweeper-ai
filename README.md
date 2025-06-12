@@ -1,8 +1,7 @@
 # Minesweeper Game
 
-[![Tests](https://github.com/USERNAME/minesweeper-ai/workflows/Tests/badge.svg)](https://github.com/USERNAME/minesweeper-ai/actions)
-[![CI/CD](https://github.com/USERNAME/minesweeper-ai/workflows/CI%2FCD/badge.svg)](https://github.com/USERNAME/minesweeper-ai/actions)
-[![codecov](https://codecov.io/gh/USERNAME/minesweeper-ai/branch/main/graph/badge.svg)](https://codecov.io/gh/USERNAME/minesweeper-ai)
+[![Tests & Coverage](https://github.com/ChrisBrinton/minesweeper-ai/workflows/Tests%20%26%20Coverage/badge.svg)](https://github.com/ChrisBrinton/minesweeper-ai/actions)
+[![codecov](https://codecov.io/gh/ChrisBrinton/minesweeper-ai/branch/main/graph/badge.svg)](https://codecov.io/gh/ChrisBrinton/minesweeper-ai)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
