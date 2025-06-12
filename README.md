@@ -95,14 +95,48 @@ The game follows object-oriented design principles:
 - **`SmileyButton`**: Expressive smiley face that shows game state
 - **`CellButton`**: Individual cell buttons with proper event handling
 
-## AI Training Ready
+## AI Training System
 
-This implementation provides a clean separation between game logic and UI, making it perfect for AI training scenarios. The `GameBoard` class can be used independently for:
+This implementation includes a comprehensive **Deep Q-Network (DQN) AI training system** for learning to play Minesweeper:
 
-- Reinforcement learning environments
-- Game state analysis
-- Algorithm testing
-- Educational purposes
+### 🤖 AI Training Features
+- **Multiple difficulty levels**: Beginner, Intermediate, Expert
+- **Advanced DQN architecture** with dueling networks
+- **Parallel evaluation**: Multiple evaluation methods for performance
+- **Resume capability**: Continue training from checkpoints
+- **Comprehensive metrics**: Win rates, rewards, training plots
+
+### 🚀 Quick Start Training
+```bash
+# Primary training entry point
+python train_ai.py --help
+
+# Start new training
+python train_ai.py --mode new --difficulty beginner --episodes 5000
+
+# Resume from existing checkpoint
+python train_ai.py --mode resume --eval-method lightweight
+
+# Benchmark evaluation methods
+python train_ai.py --mode benchmark --episodes 50
+```
+
+### 📊 Evaluation Methods
+- **Sequential**: Standard single-threaded evaluation with progress
+- **Lightweight**: Thread-based parallel evaluation (recommended)
+- **Optimized**: Process-based parallel evaluation for maximum performance
+
+### 🎯 Training Phases
+The system uses a phased training approach:
+1. **Foundation**: Extended learning with stable parameters
+2. **Stabilization**: Gradual parameter adjustment
+3. **Mastery**: Fine-tuning with preserved knowledge
+
+### 🔧 Core Components
+- **`MinesweeperEnvironment`**: RL environment wrapper
+- **`DQN`**: Deep Q-Network with CNN backbone
+- **`DQNTrainer`**: Training orchestration with experience replay
+- **`evaluation.py`**: Parallel evaluation system
 
 ## Testing & Coverage
 

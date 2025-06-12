@@ -447,10 +447,10 @@ def enable_optimized_parallel_evaluation(trainer, num_workers=None, cpu_limit_pe
     
     # Store original evaluation method
     trainer._evaluate_sequential = trainer._evaluate
-    
-    # Replace with optimized parallel version
-    def _evaluate_parallel():
-        return evaluator.evaluate_parallel(trainer.config['eval_episodes'])
+      # Replace with optimized parallel version
+    def _evaluate_parallel(num_episodes=None):
+        episodes = num_episodes or trainer.config['eval_episodes']
+        return evaluator.evaluate_parallel(episodes)
     
     trainer._evaluate = _evaluate_parallel
     trainer.parallel_evaluator = evaluator
@@ -476,10 +476,10 @@ def enable_lightweight_parallel_evaluation(trainer, num_threads=None):
     
     # Store original evaluation method
     trainer._evaluate_sequential = trainer._evaluate
-    
-    # Replace with lightweight parallel version
-    def _evaluate_parallel():
-        return evaluator.evaluate_parallel(trainer.config['eval_episodes'])
+      # Replace with lightweight parallel version
+    def _evaluate_parallel(num_episodes=None):
+        episodes = num_episodes or trainer.config['eval_episodes']
+        return evaluator.evaluate_parallel(episodes)
     
     trainer._evaluate = _evaluate_parallel
     trainer.parallel_evaluator = evaluator
@@ -504,10 +504,10 @@ def enable_sequential_evaluation_with_progress(trainer):
     
     # Store original evaluation method
     trainer._evaluate_original = trainer._evaluate
-    
-    # Replace with sequential version with progress
-    def _evaluate_sequential():
-        return evaluator.evaluate_sequential(trainer.config['eval_episodes'])
+      # Replace with sequential version with progress
+    def _evaluate_sequential(num_episodes=None):
+        episodes = num_episodes or trainer.config['eval_episodes']
+        return evaluator.evaluate_sequential(episodes)
     
     trainer._evaluate = _evaluate_sequential
     trainer.sequential_evaluator = evaluator

@@ -1,6 +1,9 @@
 """
 Minesweeper Game - Main Entry Point
 Classic Windows 3.1 style minesweeper game
+
+For AI training, use train_ai.py instead:
+  python train_ai.py --help
 """
 
 import sys
