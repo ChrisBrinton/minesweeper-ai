@@ -47,11 +47,13 @@ def test_timer_logic_requirements():
 
 def test_game_completion_states():
     """Test that game can reach completion states for timer stopping"""
-    # Test win condition is possible
-    board = GameBoard(3, 3, 1)  # Small board with 1 mine
+    # Use standard beginner difficulty to prevent immediate wins from auto-reveal
+    board = GameBoard(9, 9, 10)  # Standard beginner: 71 safe cells, impossible to reveal all in one chain
     
-    # Make first move
-    board.reveal_cell(0, 0)
+    # Make first move in center area to avoid corner edge effects
+    board.reveal_cell(4, 4)
+    
+    # With standard beginner board, first click should always result in PLAYING state
     assert board.game_state == GameState.PLAYING
     
     # Game should be able to reach WON or LOST states
@@ -74,11 +76,12 @@ def test_multiple_game_sessions():
 
 def test_timer_edge_cases():
     """Test timer behavior in edge cases"""
-    # Very small board
-    board = GameBoard(2, 2, 1)
+    # Small board - use 3x3 with 2 mines to prevent immediate wins
+    board = GameBoard(3, 3, 2)
     assert board.game_state == GameState.READY
     
-    board.reveal_cell(0, 0)
+    board.reveal_cell(1, 1)  # Center click
+    # With 7 safe cells, unlikely to win immediately
     assert board.game_state == GameState.PLAYING
     
     # Large board
