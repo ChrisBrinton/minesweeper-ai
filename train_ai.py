@@ -324,17 +324,18 @@ class EnhancedBeginnerTrainerV2Resume:
             
             episode_count = phase_episodes_so_far
             best_win_rate = 0.0
-            
             print(f"⏳ Training {phase_name} phase...")
             
-            for episode in range(episodes_to_run):                # Train one episode
+            for episode in range(episodes_to_run):
+                # Train one episode
                 trainer._train_episode()
                 episode_count += 1
                 
                 # Evaluation checkpoint
                 if episode_count % eval_frequency == 0:
                     print(f"\n📊 Evaluation at episode {episode_count} (Phase: {phase_name})")
-                      # Run evaluation
+                    
+                    # Run evaluation
                     win_rate, avg_score = trainer._evaluate(num_episodes=eval_episodes)
                     
                     print(f"   🏆 Win rate: {win_rate:.1%}")
