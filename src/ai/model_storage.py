@@ -102,53 +102,58 @@ def list_model_checkpoints(model_dir: str) -> list[str]:
             checkpoints.append(os.path.join(model_dir, file))
         elif file == "final_model.pth":
             checkpoints.append(os.path.join(model_dir, file))
-    
-    # Sort by phase priority and episode number (final comes last)
+      # Sort by phase priority and episode number (final comes last)
     def sort_key(path):
         filename = os.path.basename(path)
-          # Enhanced format priority: Foundation < Stabilization < Mastery < Best/Final
-        if filename == "foundation_checkpoint.pth":
-            return 100
+        
+        # Legacy episode-based checkpoints (priority 1-999)
+        if filename.startswith("dqn_episode_") and filename.endswith(".pth"):
+            try:
+                episode = int(filename.split('_episode_')[1].split('.pth')[0])
+                return episode
+            except (IndexError, ValueError):
+                return 0
+        
+        # Legacy final model (comes last)
+        elif filename == "dqn_final.pth":
+            return float('inf')  # Final model comes last
+        
+        # Enhanced format priority: Foundation < Stabilization < Mastery < Best/Final (after legacy)
+        elif filename == "foundation_checkpoint.pth":
+            return 1100  # After legacy episodes
         elif filename == "stabilization_checkpoint.pth":
-            return 200
+            return 1200
         elif filename == "mastery_checkpoint.pth":
-            return 300
+            return 1300
         elif filename == "best_model_checkpoint.pth":
-            return 900
+            return 1900
         elif filename == "final_model.pth":
-            return 1000
+            return 2000
         
         # Periodic checkpoints: foundation_checkpoint_ep1000.pth, etc.
         elif "_checkpoint_ep" in filename:
             try:
                 # Extract phase and episode number
                 if filename.startswith("foundation_checkpoint_ep"):
-                    base_priority = 100
+                    base_priority = 1100
                     episode = int(filename.replace("foundation_checkpoint_ep", "").replace(".pth", ""))
                 elif filename.startswith("stabilization_checkpoint_ep"):
-                    base_priority = 200
+                    base_priority = 1200
                     episode = int(filename.replace("stabilization_checkpoint_ep", "").replace(".pth", ""))
                 elif filename.startswith("mastery_checkpoint_ep"):
-                    base_priority = 300
+                    base_priority = 1300
                     episode = int(filename.replace("mastery_checkpoint_ep", "").replace(".pth", ""))
                 else:
-                    base_priority = 150  # Default for unknown phase
+                    base_priority = 1150  # Default for unknown phase
                     episode = 0
                 
                 # Within a phase, higher episode numbers have higher priority
                 return base_priority + (episode / 100000)  # Small increment for episode progression
             except (ValueError, IndexError):
-                return 150
+                return 1150
         
-        # Legacy format
-        elif filename == "dqn_final.pth":
-            return float('inf')  # Final model comes last
-        
-        # Legacy episode-based checkpoints
-        try:
-            episode = int(filename.split('_episode_')[1].split('.pth')[0])
-            return episode
-        except (IndexError, ValueError):
+        # Unknown files
+        else:
             return 0
     
     checkpoints.sort(key=sort_key)
