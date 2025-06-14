@@ -134,13 +134,12 @@ class TestListModelCheckpoints:
         
         yield temp_dir
         shutil.rmtree(temp_dir)
-    
     def test_list_model_checkpoints_existing_dir(self, temp_model_dir):
         """Test listing checkpoints in existing directory"""
         checkpoints = list_model_checkpoints(temp_model_dir)
         
-        # Should find episode checkpoints and final model
-        expected_count = 4  # 3 episode files + 1 final file
+        # Should find episode checkpoints, final model, and enhanced format checkpoints
+        expected_count = 5  # 3 episode files + 1 final file + 1 enhanced format checkpoint
         assert len(checkpoints) == expected_count
         
         # Check that files are properly sorted (final should be last)

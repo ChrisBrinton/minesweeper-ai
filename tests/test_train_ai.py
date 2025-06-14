@@ -41,22 +41,23 @@ class TestEnhancedBeginnerTrainerV2Resume:
         """Create a mock trainer for testing"""
         trainer = Mock()
         trainer.q_network = Mock()
-        trainer.target_network = Mock()
+        trainer.target_network = Mock()        
         trainer.optimizer = Mock()
         trainer.epsilon = 0.5
         trainer.learning_rate = 0.001
         trainer.batch_size = 64
         trainer.memory = Mock()
         trainer.memory.maxlen = 50000
-        
-        # Mock state_dict methods
+        trainer.config = {'target_update_freq': 100}  # Add config for target network updates
+          # Mock state_dict methods
         trainer.q_network.state_dict.return_value = {"dummy": "q_network_state"}
         trainer.target_network.state_dict.return_value = {"dummy": "target_network_state"}
+        trainer.target_network.load_state_dict = Mock()  # Add for target network updates
         trainer.optimizer.state_dict.return_value = {"dummy": "optimizer_state"}
         
         # Mock training methods
         trainer._train_episode.return_value = (-10.0, 50, False)
-        trainer._evaluate.return_value = (0.0, -15.5)  # win_rate, avg_score
+        trainer._evaluate.return_value = (-15.5, 0.0)  # avg_reward, win_rate
         
         return trainer
     
@@ -88,17 +89,18 @@ class TestEnhancedBeginnerTrainerV2Resume:
         # Check phase names
         phase_names = [phase['name'] for phase in phases]
         assert phase_names == ['Foundation', 'Stabilization', 'Mastery']
-        
-        # Check phase parameters
+          # Check phase parameters
         foundation = phases[0]
         assert foundation['episodes'] == 15000
         assert foundation['learning_rate'] == 0.001
         assert foundation['epsilon_start'] == 0.9
-        assert foundation['epsilon_end'] == 0.3
+        assert foundation['epsilon_end'] == 0.1
         assert foundation['batch_size'] == 64
         assert foundation['memory_size'] == 50000
         assert foundation['eval_frequency'] == 100
         assert foundation['eval_episodes'] == 100
+        assert foundation['expected_win_rate'] == 0.15
+        assert foundation['min_win_rate'] == 0.05
     
     def test_legacy_directories_configuration(self):
         """Test that legacy directories are properly configured"""
@@ -358,16 +360,17 @@ class TestEnhancedBeginnerTrainerV2Resume:
     def test_run_phase_training_success(self, temp_dir, mock_trainer):
         """Test successful phase training execution"""
         trainer = EnhancedBeginnerTrainerV2Resume(save_dir=temp_dir)
-        
         phase = {
             'name': 'Foundation',
             'episodes': 10,  # Small number for testing
             'eval_frequency': 5,
-            'eval_episodes': 10
+            'eval_episodes': 10,
+            'expected_win_rate': 0.15,
+            'min_win_rate': 0.05
         }
         
         # Mock evaluation to return improving win rates
-        mock_trainer._evaluate.side_effect = [(0.1, -20.0), (0.2, -15.0)]
+        mock_trainer._evaluate.side_effect = [(-20.0, 0.1), (-15.0, 0.2)]
         
         with patch.object(trainer, '_save_checkpoint') as mock_save:
             result = trainer._run_phase_training(
@@ -386,16 +389,17 @@ class TestEnhancedBeginnerTrainerV2Resume:
             save_dir=temp_dir,
             target_win_rate=0.3
         )
-        
         phase = {
             'name': 'Foundation',
             'episodes': 20,
             'eval_frequency': 5,
-            'eval_episodes': 10
+            'eval_episodes': 10,
+            'expected_win_rate': 0.15,
+            'min_win_rate': 0.05
         }
         
         # Mock evaluation to reach target
-        mock_trainer._evaluate.return_value = (0.35, -10.0)  # Above target
+        mock_trainer._evaluate.return_value = (-10.0, 0.35)  # Above target
         
         with patch.object(trainer, '_save_checkpoint'):
             with patch.object(trainer, '_save_final_model') as mock_save_final:
@@ -431,7 +435,6 @@ class TestCLIFunctions:
         mock_trainer = Mock()
         mock_trainer.run.return_value = True
         mock_trainer_class.return_value = mock_trainer
-        
         result = create_new_training(mock_args)
         
         assert result is True
@@ -439,7 +442,8 @@ class TestCLIFunctions:
             difficulty="beginner",
             num_eval_workers=4,
             evaluation_method="lightweight",
-            target_win_rate=0.5
+            target_win_rate=0.5,
+            total_episodes=100
         )
         mock_trainer.run.assert_called_once()
     
@@ -449,7 +453,6 @@ class TestCLIFunctions:
         mock_trainer = Mock()
         mock_trainer.run.return_value = True
         mock_trainer_class.return_value = mock_trainer
-        
         result = resume_training(mock_args)
         
         assert result is True
@@ -458,7 +461,8 @@ class TestCLIFunctions:
             num_eval_workers=4,
             evaluation_method="lightweight",
             target_win_rate=0.5,
-            save_dir=None
+            save_dir=None,
+            total_episodes=100
         )
         mock_trainer.run.assert_called_once()
     
@@ -576,15 +580,16 @@ class TestTrainingIntegration:
     @patch('train_ai.create_trainer')
     @patch('train_ai.enable_sequential_evaluation_with_progress')
     def test_complete_training_workflow(self, mock_eval, mock_create_trainer, temp_model_dir):
-        """Test a complete training workflow end-to-end"""
-        # Setup mock trainer
+        """Test a complete training workflow end-to-end"""        # Setup mock trainer
         mock_trainer = Mock()
         mock_trainer.q_network.state_dict.return_value = {"test": "state"}
         mock_trainer.target_network.state_dict.return_value = {"test": "state"}
+        mock_trainer.target_network.load_state_dict = Mock()  # Add for target network updates
         mock_trainer.optimizer.state_dict.return_value = {"test": "state"}
         mock_trainer.epsilon = 0.5
+        mock_trainer.config = {'target_update_freq': 100}  # Add config for target network updates
         mock_trainer._train_episode.return_value = (-10.0, 50, False)
-        mock_trainer._evaluate.return_value = (0.1, -15.0)
+        mock_trainer._evaluate.return_value = (-15.0, 0.1)
         mock_create_trainer.return_value = mock_trainer
         
         # Create trainer with minimal episodes for testing
@@ -592,8 +597,7 @@ class TestTrainingIntegration:
             save_dir=temp_model_dir,
             evaluation_method="sequential"
         )
-        
-        # Patch training phases to have fewer episodes
+          # Patch training phases to have fewer episodes
         trainer.training_phases = [
             {
                 'name': 'Foundation',
@@ -605,7 +609,9 @@ class TestTrainingIntegration:
                 'batch_size': 64,
                 'memory_size': 50000,
                 'eval_frequency': 1,
-                'eval_episodes': 1
+                'eval_episodes': 1,
+                'expected_win_rate': 0.15,
+                'min_win_rate': 0.05
             }
         ]
         

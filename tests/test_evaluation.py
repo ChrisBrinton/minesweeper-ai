@@ -167,14 +167,14 @@ class TestTrainerPatchingFunctions:
     @pytest.fixture
     def mock_trainer(self):
         """Create a mock trainer for testing"""
-        trainer = Mock()
+        trainer = Mock()        
         trainer.config = {
             'eval_episodes': 10,
             'max_steps_per_episode': 100
         }
         trainer.epsilon = 0.5
         trainer.device = 'cpu'
-        trainer._evaluate = Mock(return_value=(0.5, -10.0))
+        trainer._evaluate = Mock(return_value=(-10.0, 0.5))
         
         # Mock environment
         env = Mock()
@@ -199,11 +199,10 @@ class TestTrainerPatchingFunctions:
         assert result_trainer == mock_trainer
         assert hasattr(mock_trainer, '_evaluate_original')
         assert hasattr(mock_trainer, 'sequential_evaluator')
-        
-        # Test that _evaluate was replaced
-        win_rate, avg_score = mock_trainer._evaluate(num_episodes=2)
-        assert isinstance(win_rate, float)
+          # Test that _evaluate was replaced
+        avg_score, win_rate = mock_trainer._evaluate(num_episodes=2)
         assert isinstance(avg_score, float)
+        assert isinstance(win_rate, float)
     
     def test_enable_lightweight_parallel_evaluation(self, mock_trainer):
         """Test enabling lightweight parallel evaluation"""
@@ -245,9 +244,8 @@ class TestBenchmarkFunction:
         
         # Make config mutable for benchmark testing
         trainer.config = {}
-        
-        # Mock the original _evaluate method
-        trainer._evaluate = Mock(return_value=(0.3, -12.0))
+          # Mock the original _evaluate method
+        trainer._evaluate = Mock(return_value=(-12.0, 0.3))
         
         return trainer
     
@@ -258,17 +256,17 @@ class TestBenchmarkFunction:
         """Test benchmark function"""
         # Mock the patched trainers to return different results
         mock_seq_trainer = Mock()
-        mock_seq_trainer._evaluate.return_value = (0.2, -15.0)
+        mock_seq_trainer._evaluate.return_value = (-15.0, 0.2)
         mock_seq_trainer.config = {}
         mock_seq.return_value = mock_seq_trainer
         
         mock_light_trainer = Mock()
-        mock_light_trainer._evaluate.return_value = (0.25, -12.0)
+        mock_light_trainer._evaluate.return_value = (-12.0, 0.25)
         mock_light_trainer.config = {}
         mock_light.return_value = mock_light_trainer
         
         mock_opt_trainer = Mock()
-        mock_opt_trainer._evaluate.return_value = (0.3, -10.0)
+        mock_opt_trainer._evaluate.return_value = (-10.0, 0.3)
         mock_opt_trainer.config = {}
         mock_opt.return_value = mock_opt_trainer
           # Run benchmark
@@ -393,12 +391,11 @@ class TestEvaluationEdgeCases:
         
         # Should handle missing config gracefully
         assert evaluator.trainer == trainer
-    
     def test_evaluation_method_switching(self):
         """Test switching between evaluation methods"""
         trainer = Mock()
         trainer.config = {'eval_episodes': 5}
-        trainer._evaluate = Mock(return_value=(0.5, -10.0))
+        trainer._evaluate = Mock(return_value=(-10.0, 0.5))
         
         # Enable sequential
         trainer = enable_sequential_evaluation_with_progress(trainer)
