@@ -108,15 +108,16 @@ class AIPlayer:
                 action = masked_q_values.argmax().item()
             else:
                 action = q_values.argmax().item()
-            
             return action
-    def action_to_coordinates(self, action: int) -> Tuple[int, int]:
-        """Convert flattened action index to (row, col) coordinates"""
+    
+    def action_to_coordinates(self, action: int) -> Tuple[int, int, int]:
+        """Convert flattened action index to (row, col, action_type) coordinates"""
         # Action index includes action type, divide by 3 to get the cell position
         cell_position = action // 3
+        action_type = action % 3  # 0=reveal, 1=flag, 2=unflag
         row = cell_position // self.cols
         col = cell_position % self.cols
-        return row, col
+        return row, col, action_type
 
 
 class AIDemo:
@@ -142,11 +143,14 @@ class AIDemo:
         
         # Initialize GUI
         self.gui = MinesweeperGUI()
-        
-        # Demo state
+          # Demo state
         self.demo_running = False
         self.demo_thread: Optional[Thread] = None
         self.stop_event = Event()
+        
+        # Step mode state
+        self.step_mode = False
+        self.preview_move = None  # Stores (row, col) of previewed move
         
         # Statistics
         self.games_played = 0
@@ -166,8 +170,7 @@ class AIDemo:
         
         # Start with correct difficulty
         self.gui._new_game(self.difficulty)
-        
-        # Override cell click handlers to prevent human input during demo
+          # Override cell click handlers to prevent human input during demo
         self.original_cell_click = self.gui._on_cell_click
         self.original_cell_right_click = self.gui._on_cell_right_click
         
@@ -182,13 +185,21 @@ class AIDemo:
         # AI status label
         self.status_label = tk.Label(control_frame, text="🤖 AI Ready", bg='lightgray', font=('Arial', 10, 'bold'))
         self.status_label.pack(side='left', padx=5)
-        
-        # Control buttons
+          # Control buttons
         button_frame = tk.Frame(control_frame, bg='lightgray')
         button_frame.pack(side='right', padx=5)
         
+        # Step mode toggle
+        self.step_toggle = tk.Button(button_frame, text="🔄 Step Mode", command=self.toggle_step_mode, bg='lightyellow')
+        self.step_toggle.pack(side='left', padx=2)
+        
         self.start_button = tk.Button(button_frame, text="▶ Start AI", command=self.start_demo, bg='lightgreen')
         self.start_button.pack(side='left', padx=2)
+        
+        # Preview button (initially hidden)
+        self.preview_button = tk.Button(button_frame, text="👁 Preview Move", command=self.preview_move_action, bg='lightcyan', state='disabled')
+        self.preview_button.pack(side='left', padx=2)
+        self.preview_button.pack_forget()  # Hide initially
         
         self.stop_button = tk.Button(button_frame, text="⏹ Stop AI", command=self.stop_demo, bg='lightcoral', state='disabled')
         self.stop_button.pack(side='left', padx=2)
@@ -222,18 +233,23 @@ class AIDemo:
                 self.gui.root.update_idletasks()
         except Exception:
             pass  # GUI may be destroyed, ignore silently
-    
     def start_demo(self):
-        """Start AI demonstration"""
+        """Start AI demonstration (auto mode only)"""
+        if self.step_mode:
+            return  # Step mode uses step_move instead
+            
         if not self.demo_running:
             self.demo_running = True
             self.stop_event.clear()
+            
+            # Clear any preview when starting auto mode
+            self._clear_preview()
             
             # Update UI
             self.start_button.config(state='disabled')
             self.stop_button.config(state='normal')
             self._update_status("🤖 AI Playing...")
-              # Start demo thread
+            # Start demo thread
             self.demo_thread = Thread(target=self._run_demo, daemon=True)
             self.demo_thread.start()
     
@@ -252,7 +268,6 @@ class AIDemo:
                 self._update_status("🤖 AI Stopped")
             except Exception as e:
                 print(f"⚠️  UI update error (GUI may be closed): {e}")
-    
     def reset_game(self):
         """Reset game and statistics"""
         self.stop_demo()
@@ -260,8 +275,153 @@ class AIDemo:
         self.games_played = 0
         self.games_won = 0
         self.total_moves = 0
+        self.preview_move = None  # Clear any previewed move
         self._update_stats()
         self._update_status("🤖 AI Ready")
+    
+    def toggle_step_mode(self):
+        """Toggle between continuous and step mode"""
+        self.step_mode = not self.step_mode
+        
+        if self.step_mode:
+            # Enable step mode
+            self.step_toggle.config(text="▶ Auto Mode", bg='lightgreen')
+            self.start_button.config(text="👆 Step", command=self.step_move)
+            self.preview_button.pack(side='left', padx=2, before=self.stop_button)
+            self.preview_button.config(state='normal')
+            self.stop_demo()  # Stop any running demo
+            self._update_status("🤖 Step Mode - Click Step or Preview")
+        else:
+            # Enable auto mode
+            self.step_toggle.config(text="🔄 Step Mode", bg='lightyellow')
+            self.start_button.config(text="▶ Start AI", command=self.start_demo)
+            self.preview_button.pack_forget()
+            self.preview_move = None  # Clear any preview
+            self._clear_preview()
+            self._update_status("🤖 AI Ready")
+    def step_move(self):
+        """Execute a single AI move"""
+        if self.gui.game_board.game_state in [GameState.READY, GameState.PLAYING]:
+            try:
+                # Get current board state for AI
+                board_state = self._get_board_state()
+                action_mask = self._get_action_mask()
+                
+                # Check if there are any valid moves
+                if not action_mask.any():
+                    self._update_status("⚠️ No valid moves available!")
+                    return
+                
+                # Get AI action
+                action = self.ai_player.get_action(board_state, action_mask)
+                row, col, action_type = self.ai_player.action_to_coordinates(action)
+                
+                action_names = {0: "reveal", 1: "flag", 2: "unflag"}
+                action_name = action_names.get(action_type, "unknown")
+                
+                # Clear any previous preview
+                self._clear_preview()
+                
+                # Execute the move
+                self._make_move(row, col, action_type)
+                self.total_moves += 1
+                
+                # Update status and stats
+                current_state = self.gui.game_board.game_state
+                if current_state == GameState.WON:
+                    self.games_played += 1
+                    self.games_won += 1
+                    self._update_status("🎉 AI Won!")
+                    self._update_stats()
+                elif current_state == GameState.LOST:
+                    self.games_played += 1
+                    self._update_status("💥 AI Lost")
+                    self._update_stats()
+                else:
+                    self._update_status(f"🤖 Step Mode - {action_name} at ({row}, {col})")
+                    
+            except Exception as e:
+                print(f"❌ Error during step move: {e}")
+                self._update_status(f"❌ Error: {str(e)[:20]}...")
+        else:            self._update_status("🏁 Game finished - Start new game")
+    
+    def preview_move_action(self):
+        """Preview the next AI move without executing it"""
+        if self.gui.game_board.game_state in [GameState.READY, GameState.PLAYING]:
+            try:
+                # Get current board state for AI
+                board_state = self._get_board_state()
+                action_mask = self._get_action_mask()
+                
+                # Check if there are any valid moves
+                if not action_mask.any():
+                    self._update_status("⚠️ No valid moves available!")
+                    return
+                
+                # Get AI action
+                action = self.ai_player.get_action(board_state, action_mask)
+                row, col, action_type = self.ai_player.action_to_coordinates(action)
+                
+                action_names = {0: "reveal", 1: "flag", 2: "unflag"}
+                action_name = action_names.get(action_type, "unknown")
+                
+                # Clear previous preview
+                self._clear_preview()
+                
+                # Store and show the preview
+                self.preview_move = (row, col, action_type)
+                self._show_preview(row, col)
+                
+                self._update_status(f"👁 Preview: AI wants to {action_name} ({row}, {col})")
+                
+            except Exception as e:
+                print(f"❌ Error during move preview: {e}")
+                self._update_status(f"❌ Error: {str(e)[:20]}...")
+        else:
+            self._update_status("🏁 Game finished - Start new game")
+    
+    def _show_preview(self, row: int, col: int):
+        """Highlight the previewed move on the board"""
+        try:
+            # Get the button for this cell
+            if (0 <= row < self.gui.game_board.rows and 
+                0 <= col < self.gui.game_board.cols):
+                
+                # Access the button from the GUI's button grid
+                if hasattr(self.gui, 'buttons') and self.gui.buttons:
+                    button = self.gui.buttons[row][col]
+                    # Store original color for restoration
+                    if not hasattr(self, '_original_button_color'):
+                        self._original_button_color = button.cget('bg')
+                    # Highlight with a preview color
+                    button.config(bg='yellow', relief='raised')
+                    
+        except Exception as e:            print(f"⚠️ Error showing preview: {e}")
+    
+    def _clear_preview(self):
+        """Clear any highlighted preview move"""
+        try:
+            if self.preview_move and hasattr(self.gui, 'buttons') and self.gui.buttons:
+                # Handle both old format (row, col) and new format (row, col, action_type)
+                if len(self.preview_move) == 3:
+                    row, col, action_type = self.preview_move
+                else:
+                    row, col = self.preview_move[:2]
+                    
+                if (0 <= row < self.gui.game_board.rows and 
+                    0 <= col < self.gui.game_board.cols):
+                    
+                    button = self.gui.buttons[row][col]
+                    # Restore original appearance
+                    if hasattr(self, '_original_button_color'):
+                        button.config(bg=self._original_button_color, relief='raised')
+                    else:
+                        button.config(bg='SystemButtonFace', relief='raised')
+                        
+        except Exception as e:
+            print(f"⚠️ Error clearing preview: {e}")
+        finally:
+            self.preview_move = None
     
     def _run_demo(self):
         """Main demo loop (runs in separate thread)"""
@@ -306,15 +466,17 @@ class AIDemo:
                 if not action_mask.any():
                     print("⚠️  No valid moves available!")
                     break
-                
-                # Get AI action
+                  # Get AI action
                 action = self.ai_player.get_action(board_state, action_mask)
-                row, col = self.ai_player.action_to_coordinates(action)
+                row, col, action_type = self.ai_player.action_to_coordinates(action)
                 
-                print(f"🤖 AI Move {game_moves + 1}: ({row}, {col})")
-                  # Execute move on GUI thread
-                print(f"   Executing move at ({row}, {col})")
-                self.gui.root.after(0, lambda r=row, c=col: self._make_move(r, c))
+                action_names = {0: "reveal", 1: "flag", 2: "unflag"}
+                action_name = action_names.get(action_type, "unknown")
+                
+                print(f"🤖 AI Move {game_moves + 1}: {action_name} at ({row}, {col})")
+                # Execute move on GUI thread
+                print(f"   Executing {action_name} move at ({row}, {col})")
+                self.gui.root.after(0, lambda r=row, c=col, at=action_type: self._make_move(r, c, at))
                 
                 # Wait for move delay
                 time.sleep(self.delay)
@@ -375,7 +537,6 @@ class AIDemo:
                 else:  # HIDDEN
                     state[1, row, col] = 1  # Hidden
         return state
-    
     def _get_action_mask(self) -> np.ndarray:
         """Get mask of valid actions"""
         board = self.gui.game_board
@@ -386,37 +547,72 @@ class AIDemo:
         
         for row in range(board.rows):
             for col in range(board.cols):
-                cell = board.board[row][col]  # Fixed: use board.board instead of board.grid
+                cell = board.board[row][col]
                 
-                # For demo, we only use reveal action (type 0)
                 # Calculate action indices for all three actions
                 base_idx = (row * board.cols + col) * 3
                 reveal_idx = base_idx + 0  # Reveal action
+                flag_idx = base_idx + 1    # Flag action
+                unflag_idx = base_idx + 2  # Unflag action
                 
-                # Can only click on hidden cells
                 if cell.state == CellState.HIDDEN:
-                    # Only allow reveal action for demo simplicity
+                    # Can reveal or flag hidden cells
                     action_mask[reveal_idx] = True
+                    action_mask[flag_idx] = True
+                elif cell.state == CellState.FLAGGED:
+                    # Can only unflag flagged cells
+                    action_mask[unflag_idx] = True
+                # Note: Cannot perform any actions on revealed cells
         
         return action_mask
-    
-    def _make_move(self, row: int, col: int):
-        """Make a move on the GUI (must run on main thread)"""
+    def _make_move(self, row: int, col: int, action_type: int = 0):
+        """Make a move on the GUI (must run on main thread)
+        
+        Args:
+            row: Row coordinate
+            col: Column coordinate  
+            action_type: 0=reveal, 1=flag, 2=unflag
+        """
         try:
             if (0 <= row < self.gui.game_board.rows and 
-                0 <= col < self.gui.game_board.cols and
-                self.gui.game_board.board[row][col].state == CellState.HIDDEN):  # Fixed: use board.board
+                0 <= col < self.gui.game_board.cols):
                 
-                print(f"   🖱️ Making move at ({row}, {col})")
-                # Use the original cell click handler
-                self.original_cell_click(row, col)
-                print(f"   ✓ Move completed - Game state: {self.gui.game_board.game_state}")
+                cell = self.gui.game_board.board[row][col]
+                action_names = {0: "reveal", 1: "flag", 2: "unflag"}
+                action_name = action_names.get(action_type, "unknown")
+                
+                print(f"   🖱️ Making {action_name} move at ({row}, {col})")
+                
+                if action_type == 0:  # Reveal
+                    if cell.state == CellState.HIDDEN:
+                        self.original_cell_click(row, col)
+                    else:
+                        print(f"   ❌ Cannot reveal cell at ({row}, {col}) - Cell state: {cell.state}")
+                        return
+                        
+                elif action_type == 1:  # Flag
+                    if cell.state == CellState.HIDDEN:
+                        self.gui.game_board.toggle_flag(row, col)
+                        self.gui._update_display()  # Update the visual display
+                    else:
+                        print(f"   ❌ Cannot flag cell at ({row}, {col}) - Cell state: {cell.state}")
+                        return
+                        
+                elif action_type == 2:  # Unflag
+                    if cell.state == CellState.FLAGGED:
+                        self.gui.game_board.toggle_flag(row, col)
+                        self.gui._update_display()  # Update the visual display
+                    else:
+                        print(f"   ❌ Cannot unflag cell at ({row}, {col}) - Cell state: {cell.state}")
+                        return
+                        
+                print(f"   ✓ {action_name.title()} move completed - Game state: {self.gui.game_board.game_state}")
                 
             else:
-                print(f"   ❌ Invalid move at ({row}, {col}) - Cell state: {self.gui.game_board.board[row][col].state if 0 <= row < self.gui.game_board.rows and 0 <= col < self.gui.game_board.cols else 'out of bounds'}")
+                print(f"   ❌ Invalid coordinates ({row}, {col}) - out of bounds")
                 
         except Exception as e:
-            print(f"❌ Error making move ({row}, {col}): {e}")
+            print(f"❌ Error making {action_names.get(action_type, 'unknown')} move ({row}, {col}): {e}")
     
     def run(self):
         """Run the demo"""

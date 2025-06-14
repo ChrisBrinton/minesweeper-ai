@@ -36,8 +36,8 @@ class MinesweeperEnvironment:
         self.reward_config = reward_config or {
             'win': 100.0,
             'lose': -100.0,
-            'reveal_safe': 1.0,
-            'reveal_number': 2.0,
+            'reveal_safe': 2.0,
+            'reveal_number': 4.0,
             'flag_correct': 5.0,
             'flag_incorrect': -10.0,
             'invalid_action': -1.0,

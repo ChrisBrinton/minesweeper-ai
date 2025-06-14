@@ -24,13 +24,21 @@ class EnhancedBeginnerTrainerV2Resume:
     def __init__(self, difficulty="beginner", num_eval_workers=None, evaluation_method="lightweight", target_win_rate=0.50, save_dir=None, total_episodes=None):
         self.difficulty = difficulty.lower()
         self.target_win_rate = target_win_rate
-        
-        # Use new organized directory structure
+          # Use new organized directory structure
         if save_dir:
             self.save_dir = save_dir
         else:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.save_dir = get_model_save_dir(self.difficulty, timestamp)
+            # Try to find latest existing model directory for resume mode
+            from src.ai.model_storage import find_latest_model_dir
+            existing_dir = find_latest_model_dir(self.difficulty)
+            
+            if existing_dir:
+                print(f"🔍 Found existing model directory: {existing_dir}")
+                self.save_dir = existing_dir
+            else:
+                print(f"🆕 No existing model directory found, creating new one")
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.save_dir = get_model_save_dir(self.difficulty, timestamp)
         
         # Legacy directories for backward compatibility
         self.legacy_dirs = [

@@ -362,7 +362,7 @@ class SequentialEvaluator:
         """
         self.trainer = trainer
         print("📈 Sequential evaluator initialized")
-        
+    
     def evaluate_sequential(self, num_episodes: int) -> Tuple[float, float]:
         """
         Run evaluation episodes sequentially with progress
@@ -383,13 +383,26 @@ class SequentialEvaluator:
         self.trainer.epsilon = 0.0
         
         print(f"🎯 Running {num_episodes} evaluation episodes...")
+        
+        # Initialize progress bar
+        bar_width = 40  # Width of the progress bar
+          # Show initial progress
+        bar = '░' * bar_width
+        print(f"   ⏳ [{bar}] 0/{num_episodes} (0.0%) - Starting...", end='', flush=True)
+        
         for i in range(num_episodes):
             if i % 10 == 0 and i > 0:
                 elapsed = time.time() - start_time
                 rate = i / elapsed
                 eta = (num_episodes - i) / rate if rate > 0 else 0
-                print(f"   Progress: {i}/{num_episodes} ({i/num_episodes*100:.1f}%) - "
-                      f"ETA: {eta:.1f}s")
+                
+                # Calculate progress bar
+                progress = i / num_episodes
+                filled_length = int(bar_width * progress)
+                bar = '█' * filled_length + '░' * (bar_width - filled_length)
+                
+                # Update progress bar (overwrite previous line)
+                print(f"\r   ⏳ [{bar}] {i}/{num_episodes} ({progress*100:.1f}%) - ETA: {eta:.1f}s", end='', flush=True)
             
             state = self.trainer.env.reset()
             total_reward = 0.0
@@ -410,9 +423,12 @@ class SequentialEvaluator:
             
             total_rewards.append(total_reward)
             wins.append(info.get('game_state') == 'won')
-        
-        # Restore epsilon
+          # Restore epsilon
         self.trainer.epsilon = old_epsilon
+        
+        # Show completed progress bar
+        bar = '█' * bar_width
+        print(f"\r   ⏳ [{bar}] {num_episodes}/{num_episodes} (100.0%) - Complete! ✨")
         
         avg_reward = np.mean(total_rewards)
         win_rate = np.mean(wins)
