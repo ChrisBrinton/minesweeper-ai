@@ -66,8 +66,7 @@ class DQNTrainer:
         self.env = env
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
-        
-        # Default configuration
+          # Default configuration
         default_config = {
             'learning_rate': 1e-4,
             'batch_size': 32,
@@ -79,23 +78,26 @@ class DQNTrainer:
             'memory_size': 10000,
             'min_memory_size': 1000,
             'max_episodes': 5000,
-            'max_steps_per_episode': 1000,
+            'max_steps_per_episode': 2000,
             'save_freq': 500,
             'eval_freq': 100,
             'eval_episodes': 10
         }
         
-        self.config = {**default_config, **(config or {})}
-          # Initialize networks
+        self.config = {**default_config, **(config or {})}        # Initialize networks
+        # Detect input channels from environment observation
+        sample_obs = env.reset()
+        input_channels = sample_obs.shape[-1] if len(sample_obs.shape) == 3 else 3
+        
         self.q_network = DQN(
             env.rows, env.cols, 
-            input_channels=3,
+            input_channels=input_channels,
             num_actions=env.action_space_size
         ).to(self.device)
         
         self.target_network = DQN(
             env.rows, env.cols,
-            input_channels=3,
+            input_channels=input_channels,
             num_actions=env.action_space_size
         ).to(self.device)
         
@@ -157,17 +159,29 @@ class DQNTrainer:
             # Update target network
             if episode % self.config['target_update_freq'] == 0:
                 self.target_network.load_state_dict(self.q_network.state_dict())
-            
-            # Evaluation
+              # Evaluation
             if episode % self.config['eval_freq'] == 0:
                 eval_reward, eval_win_rate = self._evaluate()
                 self.eval_rewards.append(eval_reward)
                 self.eval_win_rates.append(eval_win_rate)
                 
+                # Calculate batch statistics (from the last eval_freq episodes)
+                batch_start = max(0, episode - self.config['eval_freq'] + 1)
+                batch_rewards = self.training_rewards[batch_start:episode + 1]
+                batch_steps = self.training_steps[batch_start:episode + 1]
+                batch_wins = self.training_wins[batch_start:episode + 1]
+                
+                # Batch statistics
+                avg_reward = np.mean(batch_rewards) if batch_rewards else 0.0
+                avg_steps = np.mean(batch_steps) if batch_steps else 0.0
+                num_wins = sum(batch_wins)
+                num_losses = sum(1 for win in batch_wins if win is False)
+                num_incomplete = len(batch_wins) - num_wins - num_losses  # Should be 0 normally
+                
                 print(f"Episode {episode:4d} | "
-                      f"Reward: {episode_reward:7.2f} | "
-                      f"Steps: {episode_steps:3d} | "
-                      f"Won: {won} | "
+                      f"Avg Reward: {avg_reward:7.2f} | "
+                      f"Avg Steps: {avg_steps:5.1f} | "
+                      f"W/L/I: {num_wins:2d}/{num_losses:2d}/{num_incomplete:2d} | "
                       f"Epsilon: {self.epsilon:.3f} | "
                       f"Eval Reward: {eval_reward:.2f} | "
                       f"Eval Win Rate: {eval_win_rate:.3f}")

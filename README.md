@@ -101,12 +101,15 @@ This implementation includes a comprehensive **Deep Q-Network (DQN) AI training 
 
 ### 🤖 AI Training Features
 - **Multiple difficulty levels**: Beginner, Intermediate, Expert
+- **Curriculum Learning**: Progressive training from simple to complex boards
 - **Advanced DQN architecture** with dueling networks
 - **Parallel evaluation**: Multiple evaluation methods for performance
 - **Resume capability**: Continue training from checkpoints
 - **Comprehensive metrics**: Win rates, rewards, training plots
 
 ### 🚀 Quick Start Training
+
+#### Traditional Training
 ```bash
 # Primary training entry point
 python train_ai.py --help
@@ -121,13 +124,47 @@ python train_ai.py --mode resume --eval-method lightweight
 python train_ai.py --mode benchmark --episodes 50
 ```
 
+#### Curriculum Learning (Recommended)
+```bash
+# Start progressive curriculum from micro to expert
+python train_curriculum.py --mode new
+
+# Resume curriculum training
+python train_curriculum.py --mode resume
+
+# Check curriculum progress
+python train_curriculum.py --status
+```
+
 ### 📊 Evaluation Methods
 - **Sequential**: Standard single-threaded evaluation with progress
 - **Lightweight**: Thread-based parallel evaluation (recommended)
 - **Optimized**: Process-based parallel evaluation for maximum performance
 
-### 🎯 Training Phases
-The system uses a phased training approach:
+### 🎯 Training Approaches
+
+#### Progressive Curriculum Learning
+The system supports curriculum learning where a single model trains on increasingly difficult board configurations:
+
+1. **Micro (3x3)** → **Tiny (5x5)** → **Small (7x7)** → **Mini Beginner (8x8)**
+2. **Beginner (9x9)** → **Intermediate (16x16)** → **Expert (16x30)**
+
+Each stage has target win rates and automatic advancement. **The curriculum system is now fully functional and tested.**
+
+**Key Features:**
+- ✅ **Automated progression**: Advances through stages based on win rate targets
+- ✅ **Knowledge transfer**: Each stage builds on previous learning  
+- ✅ **Robust checkpointing**: Resume from any interruption
+- ✅ **Comprehensive monitoring**: Real-time progress and detailed logging
+- ✅ **Flexible control**: Start from any stage, limit training duration
+
+**Training time**: 8-16 hours for complete curriculum  
+**Expected outcome**: Expert-level AI that can play all difficulty levels
+
+See [CURRICULUM_GUIDE.md](CURRICULUM_GUIDE.md) for complete documentation.
+
+#### Traditional Phase-Based Training
+For single-difficulty training, the system uses a phased approach:
 1. **Foundation**: Extended learning with stable parameters
 2. **Stabilization**: Gradual parameter adjustment
 3. **Mastery**: Fine-tuning with preserved knowledge
@@ -136,6 +173,7 @@ The system uses a phased training approach:
 - **`MinesweeperEnvironment`**: RL environment wrapper
 - **`DQN`**: Deep Q-Network with CNN backbone
 - **`DQNTrainer`**: Training orchestration with experience replay
+- **`CurriculumLearningTrainer`**: Progressive difficulty training
 - **`evaluation.py`**: Parallel evaluation system
 
 ## Testing & Coverage

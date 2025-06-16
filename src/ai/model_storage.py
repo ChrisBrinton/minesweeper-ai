@@ -8,26 +8,28 @@ from datetime import datetime
 from typing import Optional
 
 
-def get_model_save_dir(difficulty: str, timestamp: Optional[str] = None, base_dir: str = "models") -> str:
+def get_model_save_dir(difficulty: str, timestamp: Optional[str] = None, base_dir: str = "models", allow_custom: bool = False) -> str:
     """
     Generate a model save directory following the organized structure.
     
     Args:
-        difficulty: Game difficulty (beginner, intermediate, expert)
+        difficulty: Game difficulty (beginner, intermediate, expert) or custom name if allow_custom=True
         timestamp: Optional timestamp string (default: current time)
         base_dir: Base models directory (default: "models")
+        allow_custom: Allow custom difficulty names beyond the standard three
         
     Returns:
         Full path to the model save directory
         
     Example:
         get_model_save_dir("beginner") -> "models/beginner/20241212_143022"
+        get_model_save_dir("curriculum", allow_custom=True) -> "models/curriculum/20241212_143022"
     """
     if timestamp is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     difficulty = difficulty.lower()
-    if difficulty not in ["beginner", "intermediate", "expert"]:
+    if not allow_custom and difficulty not in ["beginner", "intermediate", "expert"]:
         raise ValueError(f"Invalid difficulty: {difficulty}. Must be beginner, intermediate, or expert.")
     
     save_dir = os.path.join(base_dir, difficulty, timestamp)

@@ -63,8 +63,7 @@ def evaluate_episode_worker_optimized(model_state_dict, env_config, device_id, r
         input_channels=3,
         num_actions=env.action_space_size
     ).to(device)
-    
-    # Load model weights
+      # Load model weights
     model.load_state_dict(model_state_dict)
     model.eval()
     
@@ -72,7 +71,7 @@ def evaluate_episode_worker_optimized(model_state_dict, env_config, device_id, r
     state = env.reset()
     total_reward = 0.0
     steps = 0
-    max_steps = 1000  # Same as training
+    max_steps = 2000  # Match training configuration
     
     with torch.no_grad():
         while steps < max_steps:
@@ -125,12 +124,11 @@ def evaluate_episode_thread(model, env_config, random_seed, device):
         cols=env_config['cols'], 
         mines=env_config['mines']
     )
-    
-    # Run evaluation episode
+      # Run evaluation episode
     state = env.reset()
     total_reward = 0.0
     steps = 0
-    max_steps = 1000  # Same as training
+    max_steps = 2000  # Match training configuration
     
     with torch.no_grad():
         while steps < max_steps:
@@ -440,6 +438,181 @@ class SequentialEvaluator:
               f"({episodes_per_second:.1f} eps/s)")
         
         return avg_reward, win_rate
+
+
+# ============================================================================
+# Standalone Model Evaluation Function
+# ============================================================================
+
+def evaluate_model(model_path: str, difficulty: str = "beginner", difficulty_custom: tuple = None,
+                  num_games: int = 100, method: str = "lightweight", num_workers: int = None,
+                  verbose: bool = True) -> dict:
+    """
+    Standalone function to evaluate a trained model
+    
+    Args:
+        model_path: Path to the saved model file
+        difficulty: Standard difficulty ('beginner', 'intermediate', 'expert')
+        difficulty_custom: Custom difficulty as (rows, cols, mines) tuple
+        num_games: Number of games to evaluate
+        method: Evaluation method ('sequential', 'lightweight', 'optimized')
+        num_workers: Number of workers for parallel methods
+        verbose: Whether to print progress information
+        
+    Returns:
+        Dictionary with evaluation results
+    """
+    import torch
+    from src.ai.models import DQN
+    from src.ai.environment import MinesweeperEnvironment
+    
+    # Determine board configuration
+    if difficulty_custom:
+        rows, cols, mines = difficulty_custom
+    else:
+        difficulty_configs = {
+            'beginner': (9, 9, 10),
+            'intermediate': (16, 16, 40),
+            'expert': (16, 30, 99)
+        }
+        if difficulty not in difficulty_configs:
+            raise ValueError(f"Unknown difficulty: {difficulty}. Use one of {list(difficulty_configs.keys())}")
+        rows, cols, mines = difficulty_configs[difficulty]
+    
+    if verbose:
+        print(f"🔍 Evaluating model: {model_path}")
+        print(f"📋 Configuration: {rows}x{cols} board with {mines} mines")
+        print(f"🎮 Games to play: {num_games}")
+        print(f"⚙️  Method: {method}")
+    
+    # Load model
+    try:
+        checkpoint = torch.load(model_path, map_location='cpu')
+        
+        # Handle different checkpoint formats
+        if 'q_network_state_dict' in checkpoint:
+            model_state_dict = checkpoint['q_network_state_dict']
+        elif 'model_state_dict' in checkpoint:
+            model_state_dict = checkpoint['model_state_dict']
+        else:
+            # Assume the checkpoint is the state dict itself
+            model_state_dict = checkpoint
+            
+    except Exception as e:
+        raise RuntimeError(f"Failed to load model from {model_path}: {e}")
+    
+    # Create environment and model
+    env = MinesweeperEnvironment(rows, cols, mines)
+    model = DQN(rows, cols, input_channels=3, num_actions=env.action_space_size)
+    
+    try:
+        model.load_state_dict(model_state_dict)
+        model.eval()
+    except Exception as e:
+        raise RuntimeError(f"Failed to load model weights: {e}")
+    
+    # Set up evaluation method
+    if method == "sequential":
+        evaluator = SequentialEvaluator(None)  # We'll call evaluate_sequential directly
+        if verbose:
+            print("🔄 Running sequential evaluation...")
+        
+        # Run sequential evaluation
+        total_reward = 0.0
+        wins = 0
+        
+        for game in range(num_games):
+            if verbose and (game + 1) % max(1, num_games // 10) == 0:
+                progress = (game + 1) / num_games * 100
+                print(f"   Progress: {progress:.1f}% ({game + 1}/{num_games} games)")
+            # Run single game
+            state = env.reset()
+            episode_reward = 0.0
+            steps = 0
+            max_steps = 2000
+            
+            with torch.no_grad():
+                while steps < max_steps:
+                    # Convert state to tensor
+                    state_tensor = torch.FloatTensor(state).permute(2, 0, 1)
+                    action_mask = torch.BoolTensor(env.get_action_mask())
+                    
+                    # Get action (no exploration)
+                    action = model.get_action(state_tensor, action_mask, 0.0)
+                    
+                    # Take step
+                    state, reward, done, info = env.step(action)
+                    episode_reward += reward
+                    steps += 1
+                    
+                    if done:
+                        break
+            
+            total_reward += episode_reward
+            if info.get('game_state') == 'won':
+                wins += 1
+    
+    elif method == "lightweight":
+        if verbose:
+            print("🔄 Running lightweight parallel evaluation...")
+        
+        # Create a mock trainer for the evaluator
+        class MockTrainer:
+            def __init__(self, model, env):
+                self.q_network = model
+                self.env = env
+                self.device = 'cpu'
+                self.config = {'eval_episodes': num_games}
+        
+        mock_trainer = MockTrainer(model, env)
+        evaluator = LightweightParallelEvaluator(mock_trainer, num_threads=num_workers)
+          # Run evaluation
+        env_config = {'rows': rows, 'cols': cols, 'mines': mines}
+        total_reward, wins = evaluator.evaluate_parallel(num_games)
+    
+    elif method == "optimized":
+        if verbose:
+            print("🔄 Running optimized parallel evaluation...")
+        
+        # Create a mock trainer for the evaluator
+        class MockTrainer:
+            def __init__(self, model, env):
+                self.q_network = model
+                self.env = env
+                self.device = 'cpu'
+                self.config = {'eval_episodes': num_games}
+        
+        mock_trainer = MockTrainer(model, env)
+        evaluator = OptimizedParallelEvaluator(mock_trainer, num_workers=num_workers)
+          # Run evaluation
+        env_config = {'rows': rows, 'cols': cols, 'mines': mines}
+        total_reward, wins = evaluator.evaluate_parallel(num_games)
+    
+    else:
+        raise ValueError(f"Unknown evaluation method: {method}")
+    
+    # Calculate results
+    win_rate = wins / num_games
+    avg_reward = total_reward / num_games
+    
+    results = {
+        'win_rate': win_rate,
+        'wins': wins,
+        'games_played': num_games,
+        'avg_reward': avg_reward,
+        'total_reward': total_reward,
+        'model_path': model_path,
+        'board_config': (rows, cols, mines),
+        'evaluation_method': method
+    }
+    
+    if verbose:
+        print(f"\n📊 Evaluation Results:")
+        print(f"   🎯 Win Rate: {win_rate:.1%} ({wins}/{num_games})")
+        print(f"   🏆 Average Reward: {avg_reward:.2f}")
+        print(f"   📋 Board: {rows}x{cols} with {mines} mines")
+    
+    return results
 
 
 # ============================================================================
