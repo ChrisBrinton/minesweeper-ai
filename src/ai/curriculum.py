@@ -399,16 +399,18 @@ class CurriculumLearningTrainer:
             # Train in batches
             batch_size = min(1000, max_episodes - episodes_trained)
             
-            print(f"\n📈 Training batch: {episodes_trained:,} - {episodes_trained + batch_size:,} episodes")
-            
-            # Update trainer config for this batch
+            print(f"\n📈 Training batch: {episodes_trained:,} - {episodes_trained + batch_size:,} episodes")            # Update trainer config for this batch
             batch_config = trainer_config.copy()
+            # Calculate step-based frequencies based on estimated steps per episode (~10-50 steps avg)
+            estimated_steps_per_episode = 25  # Conservative estimate for step-based calculation
+            estimated_total_steps = batch_size * estimated_steps_per_episode
+            
             batch_config.update({
                 'max_episodes': batch_size,
-                'save_freq': max(batch_size // 4, 100),  # Save every 25% or at least every 100 episodes
-                'eval_freq': max(batch_size // 10, 50),  # Evaluate every 10% or at least every 50 episodes
+                'save_freq': max(estimated_total_steps // 4, 2000),  # Save every 25% of estimated steps
+                'eval_freq': max(estimated_total_steps // 8, 1000),  # Evaluate every 12.5% of estimated steps
                 'eval_episodes': min(200, batch_size // 5)  # Scale evaluation episodes with batch size
-            })            # Create new trainer for this batch (to set max_episodes correctly)
+            })# Create new trainer for this batch (to set max_episodes correctly)
             batch_trainer = DQNTrainer(env, batch_config)
             
             # Load model: priority order is resume checkpoint > previous stage > previous batch
@@ -440,15 +442,15 @@ class CurriculumLearningTrainer:
                 if os.path.exists(temp_model_path):
                     os.remove(temp_model_path)
                 model_loaded = True
-            
-            # Training phase - DQNTrainer.train() only takes save_dir
+              # Training phase - DQNTrainer.train() handles step-based evaluation/saving internally
+            # The trainer will evaluate and save based on step counts, not episode counts
             training_result = batch_trainer.train(save_dir=stage_save_dir)
             
             # Update our main trainer reference
             self.current_trainer = batch_trainer
             episodes_trained += batch_size
-            
-            # Evaluation phase
+              # Evaluation phase - Stage-level evaluation (between batches) 
+            # Note: This is episode-based for curriculum progression, while DQNTrainer uses step-based evaluation internally
             if episodes_trained >= min_episodes or episodes_trained % 2000 == 0:
                 eval_result = self._evaluate_stage_performance(stage_name, stage_config)
                 evaluation_history.append({
@@ -522,8 +524,7 @@ class CurriculumLearningTrainer:
     
     def _get_trainer_config(self, stage_config: Dict[str, Any]) -> Dict[str, Any]:
         """Get training configuration adapted for current stage"""
-        
-        # Base configuration
+          # Base configuration
         config = {
             'learning_rate': 0.001,
             'batch_size': 64,
@@ -532,26 +533,37 @@ class CurriculumLearningTrainer:
             'epsilon_start': 0.9,
             'epsilon_end': 0.1,
             'epsilon_decay': 0.995,
-            'target_update_frequency': 1000,
+            'target_update_freq': 1000,
             'evaluation_method': self.evaluation_method,
-            'num_eval_workers': self.num_eval_workers
+            'num_eval_workers': self.num_eval_workers,
+            # Default step-based frequencies
+            'eval_freq': 5000,  # Steps, not episodes
+            'save_freq': 5000,  # Steps, not episodes
+            'eval_episodes': 100
         }
         
         # Adapt based on board size and complexity
         board_size = stage_config['rows'] * stage_config['cols']
         mine_density = stage_config['mines'] / board_size
-        stage_name = stage_config.get('name', '')
-        
-        # Smaller boards: faster learning, less memory
+        stage_name = stage_config.get('name', '')        # Smaller boards: faster learning, less memory
         if board_size <= 25:  # 5x5 or smaller
             config.update({
                 'learning_rate': 0.002,
                 'batch_size': 32,
                 'memory_size': 20000,
-                'epsilon_decay': 0.99
+                'epsilon_decay': 0.99,
+                'eval_freq': 2000,  # More frequent evaluation for smaller boards
+                'save_freq': 3000,  # More frequent saving for smaller boards
+                'eval_episodes': 50  # Fewer evaluation episodes for faster feedback
             })
             
-            # Special case: slow down epsilon decay for tiny stage to allow more exploration
+            # Special case: phase_0 needs more exploration with perfect knowledge
+            if stage_name == 'phase_0':
+                config.update({
+                    'epsilon_start': 0.5,  # Lower starting epsilon for more focused learning
+                    'epsilon_decay': 0.998  # Slower decay to maintain exploration longer
+                })
+              # Special case: slow down epsilon decay for tiny stage to allow more exploration
             if stage_name == 'tiny':
                 config['epsilon_decay'] = 0.9985  # Much slower decay for better exploration
                 
@@ -560,7 +572,10 @@ class CurriculumLearningTrainer:
                 'learning_rate': 0.0015,
                 'batch_size': 48,
                 'memory_size': 35000,
-                'epsilon_decay': 0.997
+                'epsilon_decay': 0.997,
+                'eval_freq': 3000,  # Medium frequency for medium boards
+                'save_freq': 4000,
+                'eval_episodes': 75
             })
         elif board_size >= 400:  # 16x30 expert level
             config.update({
@@ -569,7 +584,10 @@ class CurriculumLearningTrainer:
                 'memory_size': 100000,
                 'epsilon_start': 0.7,
                 'epsilon_end': 0.05,
-                'epsilon_decay': 0.9995
+                'epsilon_decay': 0.9995,
+                'eval_freq': 8000,  # Less frequent evaluation for large boards
+                'save_freq': 10000,
+                'eval_episodes': 150
             })
         
         # High mine density: more conservative exploration
@@ -671,7 +689,6 @@ class CurriculumLearningTrainer:
                 method=self.evaluation_method,
                 num_workers=self.num_eval_workers,
                 verbose=False            )
-            
             return {
                 'win_rate': result['win_rate'],
                 'avg_reward': result.get('avg_reward', 0.0),
@@ -695,10 +712,16 @@ class CurriculumLearningTrainer:
         # Load the model
         rows, cols, mines = stage_config['rows'], stage_config['cols'], stage_config['mines']
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-          # Create model with correct architecture
+        
+        # Create environment to determine correct input channels
+        temp_env = PerfectKnowledgeMinesweeperEnvironment(rows, cols, mines)
+        sample_obs = temp_env.reset()
+        input_channels = sample_obs.shape[-1] if len(sample_obs.shape) == 3 else 4
+        
+        # Create model with correct architecture
         model = DQN(
             rows, cols,
-            input_channels=3,
+            input_channels=input_channels,
             num_actions=rows * cols * 3
         )
         
@@ -718,14 +741,14 @@ class CurriculumLearningTrainer:
         
         model.to(device)
         model.eval()
-          # Create environment
-        env = PerfectKnowledgeMinesweeperEnvironment(rows, cols, mines)
+        
+        # Create environment for evaluation (reuse the temp_env for consistency)
+        env = temp_env
         
         # Run evaluation episodes
         total_reward = 0.0
         wins = 0
         num_games = 100  # Smaller number since phase_0 is simple
-        
         for _ in range(num_games):
             obs = env.reset()
             
@@ -740,22 +763,28 @@ class CurriculumLearningTrainer:
             # If game is not won at start (unexpected), play normally
             episode_reward = 0.0
             done = False
+            steps = 0
+            max_steps = 1000  # Prevent infinite loops
             
-            while not done:
-                # Convert observation to tensor
-                obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(device)
+            while not done and steps < max_steps:
+                # Convert observation to tensor (match trainer format)
+                obs_tensor = torch.FloatTensor(obs).permute(2, 0, 1).unsqueeze(0).to(device)
                 
-                # Get action from model
+                # Get action mask
+                action_mask = torch.BoolTensor(env.get_action_mask()).to(device)
+                
+                # Get action from model (using same method as trainer)
                 with torch.no_grad():
-                    q_values = model(obs_tensor)
-                    action = q_values.argmax().item()
+                    action = model.get_action(obs_tensor.squeeze(0), action_mask, epsilon=0.0)
                 
                 # Take action
                 obs, reward, done, info = env.step(action)
                 episode_reward += reward
+                steps += 1
             
             total_reward += episode_reward
-            if info.get('is_won', False):
+            # Use same win detection as trainer
+            if info.get('game_state') == 'won':
                 wins += 1
         
         win_rate = wins / num_games

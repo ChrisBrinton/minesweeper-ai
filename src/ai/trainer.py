@@ -66,7 +66,8 @@ class DQNTrainer:
         self.env = env
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
-          # Default configuration
+        
+        # Default configuration
         default_config = {
             'learning_rate': 1e-4,
             'batch_size': 32,
@@ -74,14 +75,15 @@ class DQNTrainer:
             'epsilon_start': 1.0,
             'epsilon_end': 0.01,
             'epsilon_decay': 0.995,
-            'target_update_freq': 100,
+            'target_update_freq': 100,            
             'memory_size': 10000,
             'min_memory_size': 1000,
+            'update_freq': 1000,  # Update network every N steps (not episodes)
+            'eval_freq': 5000,  # Evaluate every N steps (not episodes)
             'max_episodes': 5000,
             'max_steps_per_episode': 2000,
-            'save_freq': 500,
-            'eval_freq': 100,
-            'eval_episodes': 10
+            'save_freq': 5000,  # Save every N steps (not episodes)
+            'eval_episodes': 100  # More episodes for better evaluation since it's less frequent
         }
         
         self.config = {**default_config, **(config or {})}        # Initialize networks
@@ -109,12 +111,15 @@ class DQNTrainer:
         self.criterion = nn.MSELoss()
         
         # Experience replay
-        self.memory = ReplayBuffer(self.config['memory_size'])
-        
-        # Training state
+        self.memory = ReplayBuffer(self.config['memory_size'])        # Training state
         self.epsilon = self.config['epsilon_start']
         self.episode = 0
         self.total_steps = 0
+        self.steps_since_update = 0  # Track steps since last network update
+        self.steps_since_eval = 0    # Track steps since last evaluation
+        self.steps_since_save = 0    # Track steps since last save
+        self.last_eval_episode = -1  # Track episode of last evaluation
+        self.last_training_report_episode = -1  # Track episode of last training report
         
         # Metrics
         self.training_rewards = []
@@ -140,56 +145,88 @@ class DQNTrainer:
         print(f"Episodes: {self.config['max_episodes']}")
         print(f"Max steps per episode: {self.config['max_steps_per_episode']}")
         print(f"Environment: {self.env.rows}x{self.env.cols} with {self.env.mines} mines")
-        
         start_time = time.time()
         
         for episode in range(self.config['max_episodes']):
             self.episode = episode
-            episode_reward, episode_steps, won = self._train_episode()
-            
-            # Record metrics
+            episode_reward, episode_steps, won, network_updated = self._train_episode()            # Record metrics
             self.training_rewards.append(episode_reward)
             self.training_steps.append(episode_steps)
             self.training_wins.append(won)
             
             # Decay epsilon
             self.epsilon = max(self.config['epsilon_end'], 
-                             self.epsilon * self.config['epsilon_decay'])
-            
-            # Update target network
+                             self.epsilon * self.config['epsilon_decay'])            # Update target network
             if episode % self.config['target_update_freq'] == 0:
                 self.target_network.load_state_dict(self.q_network.state_dict())
-              # Evaluation
-            if episode % self.config['eval_freq'] == 0:
+              # Report training progress only when network training actually happens
+            if network_updated:
+                # Calculate statistics since last training report
+                episodes_since_report = episode - self.last_training_report_episode
+                report_start = max(0, self.last_training_report_episode + 1)
+                
+                if report_start < len(self.training_rewards):
+                    batch_rewards = self.training_rewards[report_start:]
+                    batch_steps = self.training_steps[report_start:]
+                    batch_wins = self.training_wins[report_start:]
+                    
+                    avg_reward = np.mean(batch_rewards) if batch_rewards else 0.0
+                    avg_steps = np.mean(batch_steps) if batch_steps else 0.0
+                    num_wins = sum(1 for win in batch_wins if win is True)
+                    num_losses = sum(1 for win in batch_wins if win is False)
+                    num_incomplete = sum(1 for win in batch_wins if win is None)
+                    
+                    print(f"Training | Episode {episode:4d} | Steps: {self.total_steps:6d} | "
+                          f"Since last report ({episodes_since_report} eps) - "
+                          f"Avg Reward: {avg_reward:7.2f} | Avg Steps: {avg_steps:5.1f} | "
+                          f"W/L/I: {num_wins:2d}/{num_losses:2d}/{num_incomplete:2d} | "
+                          f"Epsilon: {self.epsilon:.3f}")
+                else:
+                    # First training report
+                    print(f"Training | Episode {episode:4d} | Steps: {self.total_steps:6d} | "
+                          f"First training update | Epsilon: {self.epsilon:.3f}")
+                
+                # Update last training report tracking
+                self.last_training_report_episode = episode
+
+            # Evaluation - based on step frequency, not network updates
+            if self.steps_since_eval >= self.config['eval_freq']:
                 eval_reward, eval_win_rate = self._evaluate()
                 self.eval_rewards.append(eval_reward)
                 self.eval_win_rates.append(eval_win_rate)
                 
-                # Calculate batch statistics (from the last eval_freq episodes)
-                batch_start = max(0, episode - self.config['eval_freq'] + 1)
-                batch_rewards = self.training_rewards[batch_start:episode + 1]
-                batch_steps = self.training_steps[batch_start:episode + 1]
-                batch_wins = self.training_wins[batch_start:episode + 1]
+                # Calculate training statistics since last evaluation
+                episodes_since_eval = episode - self.last_eval_episode
+                eval_start = max(0, self.last_eval_episode + 1)
                 
-                # Batch statistics
-                avg_reward = np.mean(batch_rewards) if batch_rewards else 0.0
-                avg_steps = np.mean(batch_steps) if batch_steps else 0.0
-                num_wins = sum(batch_wins)
-                num_losses = sum(1 for win in batch_wins if win is False)
-                num_incomplete = len(batch_wins) - num_wins - num_losses  # Should be 0 normally
+                if eval_start < len(self.training_rewards):
+                    batch_rewards = self.training_rewards[eval_start:]
+                    batch_steps = self.training_steps[eval_start:]
+                    batch_wins = self.training_wins[eval_start:]
+                      # Batch statistics since last evaluation
+                    avg_reward = np.mean(batch_rewards) if batch_rewards else 0.0
+                    avg_steps = np.mean(batch_steps) if batch_steps else 0.0
+                    num_wins = sum(1 for win in batch_wins if win is True)
+                    num_losses = sum(1 for win in batch_wins if win is False)
+                    num_incomplete = sum(1 for win in batch_wins if win is None)
+                    
+                    print(f"Evaluation | Episode {episode:4d} | Steps: {self.total_steps:6d} | "
+                          f"Since last eval ({episodes_since_eval} eps) - "
+                          f"Avg Reward: {avg_reward:7.2f} | Avg Steps: {avg_steps:5.1f} | "
+                          f"W/L/I: {num_wins:2d}/{num_losses:2d}/{num_incomplete:2d} | "
+                          f"Eval Reward: {eval_reward:.2f} | Eval Win Rate: {eval_win_rate:.3f}")
+                else:
+                    print(f"Evaluation | Episode {episode:4d} | Steps: {self.total_steps:6d} | "
+                          f"Eval Reward: {eval_reward:.2f} | Eval Win Rate: {eval_win_rate:.3f}")
                 
-                print(f"Episode {episode:4d} | "
-                      f"Avg Reward: {avg_reward:7.2f} | "
-                      f"Avg Steps: {avg_steps:5.1f} | "
-                      f"W/L/I: {num_wins:2d}/{num_losses:2d}/{num_incomplete:2d} | "
-                      f"Epsilon: {self.epsilon:.3f} | "
-                      f"Eval Reward: {eval_reward:.2f} | "
-                      f"Eval Win Rate: {eval_win_rate:.3f}")
-            
-            # Save model
-            if episode % self.config['save_freq'] == 0 and episode > 0:
-                self.save_model(os.path.join(save_dir, f"dqn_episode_{episode}.pth"))
+                # Update last evaluation tracking
+                self.last_eval_episode = episode
+                self.steps_since_eval = 0
+              # Save model - based on steps, not episodes
+            if self.steps_since_save >= self.config['save_freq']:
+                self.save_model(os.path.join(save_dir, f"dqn_step_{self.total_steps}.pth"))
                 self._save_metrics(os.path.join(save_dir, "training_metrics.json"))
+                self.steps_since_save = 0
         
         # Final save
         self.save_model(os.path.join(save_dir, "dqn_final.pth"))
@@ -207,7 +244,7 @@ class DQNTrainer:
             'losses': self.losses
         }
     
-    def _train_episode(self) -> Tuple[float, int, bool]:
+    def _train_episode(self) -> Tuple[float, int, bool, bool]:
         """Train for one episode"""
         state = self.env.reset()
         total_reward = 0.0
@@ -227,25 +264,36 @@ class DQNTrainer:
             next_state, reward, done, info = self.env.step(action)
             total_reward += reward
             steps += 1
-            self.total_steps += 1
-            
-            # Store experience
+            self.total_steps += 1            # Store experience
             self.memory.push(state, action, reward, next_state, done, 
                            self.env.get_action_mask())
             
-            # Train if enough experiences
-            if len(self.memory) >= self.config['min_memory_size']:
-                loss = self._update_network()
-                if loss is not None:
-                    self.losses.append(loss)
+            self.steps_since_update += 1
+            self.steps_since_eval += 1
+            self.steps_since_save += 1
             state = next_state
             
             if done:
                 break
+          # Update network only after complete episodes, enough experiences, and enough steps
+        network_updated = False
+        if (len(self.memory) >= self.config['min_memory_size'] and 
+            self.steps_since_update >= self.config['update_freq']):
+            loss = self._update_network()
+            if loss is not None:
+                self.losses.append(loss)
+                network_updated = True
+                self.steps_since_update = 0  # Reset counter after update
         
-        # Check if the episode was won (after the episode ends)
-        won = info.get('game_state') == 'won'
-        return total_reward, steps, won
+        # Check game outcome
+        if done:
+            # Game ended naturally (won or lost)
+            won = info.get('game_state') == 'won'
+        else:
+            # Game ended due to max steps - incomplete game
+            won = None
+            
+        return total_reward, steps, won, network_updated
     
     def _update_network(self) -> Optional[float]:
         """Update the Q-network using a batch of experiences"""
@@ -307,18 +355,22 @@ class DQNTrainer:
                 
                 total_reward += reward
                 steps += 1
-                
                 if done:
                     break
             
             total_rewards.append(total_reward)
-            wins.append(info.get('game_state') == 'won')
-        
-        # Restore epsilon
+            # Track game outcome: True for won, False for lost, None for incomplete
+            if done:
+                wins.append(info.get('game_state') == 'won')
+            else:
+                wins.append(None)  # Incomplete game
+          # Restore epsilon
         self.epsilon = old_epsilon
         
         avg_reward = np.mean(total_rewards)
-        win_rate = np.mean(wins)
+        # Calculate win rate only from completed games (exclude None values)
+        completed_games = [w for w in wins if w is not None]
+        win_rate = np.mean(completed_games) if completed_games else 0.0
         
         return avg_reward, win_rate
     

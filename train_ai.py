@@ -67,9 +67,9 @@ class EnhancedBeginnerTrainerV2Resume:
                 'learning_rate': 0.001,
                 'epsilon_start': 0.9,
                 'epsilon_end': 0.1,
-                'batch_size': 64,
+                'batch_size': 64,                
                 'memory_size': 50000,
-                'eval_frequency': 100,
+                'eval_frequency': 5000,  # Steps, not episodes
                 'eval_episodes': 100,
                 'expected_win_rate': 0.15,  # Target: 15% win rate by end of foundation
                 'min_win_rate': 0.05       # Minimum acceptable: 5% win rate
@@ -80,10 +80,10 @@ class EnhancedBeginnerTrainerV2Resume:
                 'description': 'Gradual parameter adjustment with knowledge preservation',
                 'learning_rate': 0.0008,
                 'epsilon_start': 0.1,
-                'epsilon_end': 0.01,
+                'epsilon_end': 0.01,                
                 'batch_size': 96,
                 'memory_size': 75000,
-                'eval_frequency': 100,
+                'eval_frequency': 5000,  # Steps, not episodes
                 'eval_episodes': 100,
                 'expected_win_rate': 0.35,  # Target: 35% win rate by end of stabilization
                 'min_win_rate': 0.20       # Minimum acceptable: 20% win rate
@@ -94,10 +94,10 @@ class EnhancedBeginnerTrainerV2Resume:
                 'description': 'Fine-tuning with preserved knowledge',
                 'learning_rate': 0.0005,
                 'epsilon_start': 0.01,                
-                'epsilon_end': 0.001,
+                'epsilon_end': 0.001,                
                 'batch_size': 128,
                 'memory_size': 100000,            
-                'eval_frequency': 100,
+                'eval_frequency': 5000,  # Steps, not episodes
                 'eval_episodes': 100,
                 'expected_win_rate': 0.50,  # Target: 50% win rate by end of mastery
                 'min_win_rate': 0.40       # Minimum acceptable: 40% win rate
@@ -115,10 +115,10 @@ class EnhancedBeginnerTrainerV2Resume:
         if total_episodes <= 0:
             raise ValueError("Total episodes must be positive")
         
-        print(f"🔧 Adjusting training phases for {total_episodes} total episodes")
-          # For small episode counts, use a single simplified phase
+        print(f"🔧 Adjusting training phases for {total_episodes} total episodes")        # For small episode counts, use a single simplified phase
         if total_episodes <= 1000:
-            eval_freq = min(50, max(10, total_episodes // 20))  # Evaluate every 5% or at least every 50 episodes
+            # For short training, evaluate more frequently (in steps)
+            eval_freq = min(2000, max(500, total_episodes * 10))  # Steps-based evaluation
             self.training_phases = [
                 {
                     'name': 'Learning',
@@ -129,7 +129,7 @@ class EnhancedBeginnerTrainerV2Resume:
                     'epsilon_end': 0.1,
                     'batch_size': 64,
                     'memory_size': min(50000, total_episodes * 20),
-                    'eval_frequency': eval_freq,
+                    'eval_frequency': eval_freq,  # Steps, not episodes
                     'eval_episodes': min(100, max(10, total_episodes // 10)),
                     'expected_win_rate': 0.10,  # Target: 10% win rate for short training
                     'min_win_rate': 0.02       # Minimum acceptable: 2% win rate
@@ -140,9 +140,9 @@ class EnhancedBeginnerTrainerV2Resume:
             # Foundation: 40%, Stabilization: 35%, Mastery: 25%
             foundation_episodes = int(total_episodes * 0.4)
             stabilization_episodes = int(total_episodes * 0.35)
-            mastery_episodes = total_episodes - foundation_episodes - stabilization_episodes
-            
-            eval_freq = min(100, max(25, total_episodes // 40))  # Evaluate every 2.5% or at least every 100 episodes
+            mastery_episodes = total_episodes - foundation_episodes - stabilization_episodes            
+            # Steps-based evaluation frequency for larger training
+            eval_freq = min(5000, max(1000, total_episodes * 5))  # Steps-based evaluation  
             eval_episodes = min(100, max(25, total_episodes // 20))
             self.training_phases = [
                 {
@@ -152,9 +152,9 @@ class EnhancedBeginnerTrainerV2Resume:
                     'learning_rate': 0.001,
                     'epsilon_start': 0.9,
                     'epsilon_end': 0.3,
-                    'batch_size': 64,
+                    'batch_size': 64,                    
                     'memory_size': min(50000, total_episodes * 10),
-                    'eval_frequency': eval_freq,
+                    'eval_frequency': eval_freq,  # Steps, not episodes
                     'eval_episodes': eval_episodes,
                     'expected_win_rate': 0.15,  # Target: 15% win rate
                     'min_win_rate': 0.05       # Minimum acceptable: 5% win rate
@@ -166,9 +166,9 @@ class EnhancedBeginnerTrainerV2Resume:
                     'learning_rate': 0.0008,
                     'epsilon_start': 0.3,
                     'epsilon_end': 0.15,
-                    'batch_size': 96,
+                    'batch_size': 96,                    
                     'memory_size': min(75000, total_episodes * 15),
-                    'eval_frequency': eval_freq,
+                    'eval_frequency': eval_freq,  # Steps, not episodes
                     'eval_episodes': eval_episodes,
                     'expected_win_rate': 0.35,  # Target: 35% win rate
                     'min_win_rate': 0.20       # Minimum acceptable: 20% win rate
@@ -180,9 +180,9 @@ class EnhancedBeginnerTrainerV2Resume:
                     'learning_rate': 0.0005,
                     'epsilon_start': 0.15,
                     'epsilon_end': 0.05,
-                    'batch_size': 128,
+                    'batch_size': 128,                    
                     'memory_size': min(100000, total_episodes * 20),
-                    'eval_frequency': eval_freq,
+                    'eval_frequency': eval_freq,  # Steps, not episodes
                     'eval_episodes': eval_episodes,
                     'expected_win_rate': 0.50,  # Target: 50% win rate
                     'min_win_rate': 0.40       # Minimum acceptable: 40% win rate
@@ -507,9 +507,8 @@ class EnhancedBeginnerTrainerV2Resume:
                 # Calculate epsilon for current episode in this phase
                 phase_progress = (phase_episodes_so_far + episode) / total_phase_episodes
                 current_epsilon = epsilon_start + (epsilon_end - epsilon_start) * phase_progress
-                trainer.epsilon = max(epsilon_end, current_epsilon)
-                  # Train one episode
-                trainer._train_episode()
+                trainer.epsilon = max(epsilon_end, current_epsilon)                # Train one episode
+                episode_reward, episode_steps, won, network_updated = trainer._train_episode()
                 episode_count += 1
                 
                 # Update target network periodically
@@ -520,9 +519,9 @@ class EnhancedBeginnerTrainerV2Resume:
                 if episode_count % 1000 == 0:
                     self._save_periodic_checkpoint(trainer, phase_name, episode_count, total_episodes_so_far + episode, phase_index)
                     print(f"💾 Periodic checkpoint saved at episode {episode_count}")
-                  # Evaluation checkpoint
-                if episode_count % eval_frequency == 0:
-                    print(f"\n📊 Evaluation at episode {episode_count} (Phase: {phase_name})")
+                  # Step-based evaluation checkpoint (using trainer's step counters)
+                if trainer.steps_since_eval >= trainer.config['eval_freq']:
+                    print(f"\n📊 Evaluation at episode {episode_count} (Phase: {phase_name}) - Steps: {trainer.total_steps}")
                     
                     # Run evaluation
                     avg_score, win_rate = trainer._evaluate(num_episodes=eval_episodes)
@@ -547,12 +546,21 @@ class EnhancedBeginnerTrainerV2Resume:
                         self._save_checkpoint(trainer, phase_name, episode_count, total_episodes_so_far + episode, win_rate, phase_index)
                         print(f"   💾 New best model saved! ({win_rate:.1%})")
                     
+                    # Reset evaluation step counter
+                    trainer.steps_since_eval = 0
+                    
                     # Check if target reached
                     if win_rate >= self.target_win_rate:
-                        print(f"🎯 Target win rate achieved: {win_rate:.1%} >= {self.target_win_rate:.1%}")
-                        self._save_final_model(trainer, phase_name, episode_count, total_episodes_so_far + episode, win_rate)
-                        return True
-              # Save phase completion checkpoint
+                        print(f"🎯 Target win rate ({self.target_win_rate:.1%}) achieved!")
+                        return True                        
+                # Step-based model saving
+                if trainer.steps_since_save >= trainer.config['save_freq']:
+                    save_path = os.path.join(self.save_dir, f"model_step_{trainer.total_steps}.pth")
+                    trainer.save_model(save_path)
+                    print(f"💾 Step-based model saved at step {trainer.total_steps}")
+                    trainer.steps_since_save = 0
+                    
+            # Save phase completion checkpoint
             self._save_checkpoint(trainer, phase_name, episode_count, total_episodes_so_far + episodes_to_run, best_win_rate, phase_index, is_phase_complete=True)
             
             # Phase completion summary with performance analysis

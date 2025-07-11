@@ -320,17 +320,17 @@ class PerfectKnowledgeMinesweeperEnvironment(MinesweeperEnvironment):
             reward_config: Custom reward configuration
         """
         super().__init__(rows, cols, mines, reward_config)
-        
-        # Special reward config for phase 0 - emphasize learning game logic
+          # Special reward config for phase 0 - emphasize learning game logic
         if reward_config is None:
             self.reward_config.update({
-                'win': 150.0,  # Standard win reward
+                'win': 250.0,  # Increased win reward for better learning signal
                 'lose': -100.0,  # Standard loss penalty
                 'reveal_safe': 2.0,
                 'reveal_number': 4.0,
                 'flag_correct': 10.0,  # Higher reward for correct flagging
                 'flag_incorrect': -15.0,  # Higher penalty for wrong flags
-                'step_penalty': -0.1            })
+                'step_penalty': -0.1
+            })
     
     def reset(self) -> np.ndarray:
         """
