@@ -64,7 +64,15 @@ class DQNTrainer:
             config: Training configuration
         """
         self.env = env
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Device detection: MPS → CUDA → CPU
+        if config and 'device' in config:
+            self.device = torch.device(config['device'])
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
         print(f"Using device: {self.device}")
         
         # Default configuration
@@ -78,12 +86,14 @@ class DQNTrainer:
             'target_update_freq': 100,            
             'memory_size': 10000,
             'min_memory_size': 1000,
-            'update_freq': 1000,  # Update network every N steps (not episodes)
+            'update_freq': 4,  # Update network every N steps (standard DQN)
             'eval_freq': 5000,  # Evaluate every N steps (not episodes)
             'max_episodes': 5000,
             'max_steps_per_episode': 2000,
             'save_freq': 5000,  # Save every N steps (not episodes)
-            'eval_episodes': 100  # More episodes for better evaluation since it's less frequent
+            'eval_episodes': 100,  # More episodes for better evaluation since it's less frequent
+            'tau': 0.005,  # Soft target update rate
+            'use_soft_update': False,  # Whether to use soft updates (v2 mode)
         }
         
         self.config = {**default_config, **(config or {})}        # Initialize networks
@@ -108,7 +118,7 @@ class DQNTrainer:
         
         # Optimizer and loss
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.config['learning_rate'])
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.SmoothL1Loss()
         
         # Experience replay
         self.memory = ReplayBuffer(self.config['memory_size'])        # Training state
@@ -156,9 +166,10 @@ class DQNTrainer:
             
             # Decay epsilon
             self.epsilon = max(self.config['epsilon_end'], 
-                             self.epsilon * self.config['epsilon_decay'])            # Update target network
-            if episode % self.config['target_update_freq'] == 0:
-                self.target_network.load_state_dict(self.q_network.state_dict())
+                             self.epsilon * self.config['epsilon_decay'])            # Update target network (hard copy — only if not using soft updates)
+            if not self.config.get('use_soft_update', False):
+                if episode % self.config['target_update_freq'] == 0:
+                    self.target_network.load_state_dict(self.q_network.state_dict())
               # Report training progress only when network training actually happens
             if network_updated:
                 # Calculate statistics since last training report
@@ -249,6 +260,7 @@ class DQNTrainer:
         state = self.env.reset()
         total_reward = 0.0
         steps = 0
+        network_updated = False
         
         while steps < self.config['max_steps_per_episode']:
             # Convert state to tensor
@@ -271,19 +283,29 @@ class DQNTrainer:
             self.steps_since_update += 1
             self.steps_since_eval += 1
             self.steps_since_save += 1
+            
+            # Update network inside step loop (every update_freq steps)
+            if (len(self.memory) >= self.config['min_memory_size'] and 
+                self.steps_since_update >= self.config['update_freq']):
+                loss = self._update_network()
+                if loss is not None:
+                    self.losses.append(loss)
+                    network_updated = True
+                    self.steps_since_update = 0
+                    
+                    # Soft target update after each training step
+                    if self.config.get('use_soft_update', False):
+                        tau = self.config.get('tau', 0.005)
+                        for target_param, param in zip(self.target_network.parameters(), 
+                                                       self.q_network.parameters()):
+                            target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
+            
             state = next_state
             
             if done:
                 break
-          # Update network only after complete episodes, enough experiences, and enough steps
-        network_updated = False
-        if (len(self.memory) >= self.config['min_memory_size'] and 
-            self.steps_since_update >= self.config['update_freq']):
-            loss = self._update_network()
-            if loss is not None:
-                self.losses.append(loss)
-                network_updated = True
-                self.steps_since_update = 0  # Reset counter after update
+        
+        # Legacy: keep the post-episode check for backward compat (won't fire often with update_freq=4)
         
         # Check game outcome
         if done:
@@ -305,11 +327,11 @@ class DQNTrainer:
         
         # Prepare batch tensors more efficiently
         states = np.array([e.state for e in batch])
-        states = torch.FloatTensor(states).permute(0, 3, 1, 2).to(self.device)
+        states = torch.FloatTensor(states).permute(0, 3, 1, 2).contiguous().to(self.device)
         actions = torch.LongTensor([e.action for e in batch]).to(self.device)
         rewards = torch.FloatTensor([e.reward for e in batch]).to(self.device)
         next_states = np.array([e.next_state for e in batch])
-        next_states = torch.FloatTensor(next_states).permute(0, 3, 1, 2).to(self.device)
+        next_states = torch.FloatTensor(next_states).permute(0, 3, 1, 2).contiguous().to(self.device)
         dones = torch.BoolTensor([e.done for e in batch]).to(self.device)
         
         # Current Q-values
@@ -332,16 +354,18 @@ class DQNTrainer:
         
         return loss.item()
     
-    def _evaluate(self) -> Tuple[float, float]:
+    def _evaluate(self, num_episodes: int = None) -> Tuple[float, float]:
         """Evaluate the current policy"""
         total_rewards = []
         wins = []
+        
+        eval_eps = num_episodes if num_episodes is not None else self.config['eval_episodes']
         
         # Temporary disable exploration
         old_epsilon = self.epsilon
         self.epsilon = 0.0
         
-        for _ in range(self.config['eval_episodes']):
+        for _ in range(eval_eps):
             state = self.env.reset()
             total_reward = 0.0
             steps = 0

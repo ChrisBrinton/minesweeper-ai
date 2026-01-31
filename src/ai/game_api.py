@@ -206,6 +206,38 @@ class MinesweeperAPI:
         board_array = np.stack([visible_board, revealed_channel, flagged_channel], axis=-1)
         return board_array
     
+    def get_board_array_v2(self) -> np.ndarray:
+        """
+        Get the board as a numpy array with one-hot encoding for neural network input.
+        
+        Returns:
+            3D numpy array: [rows, cols, 12]
+            Channels:
+            0: Is hidden (binary)
+            1: Is flagged (binary)
+            2: Is revealed (binary)
+            3-11: Number channels 0-8 (one-hot, only for revealed cells)
+        """
+        hidden = np.zeros((self.rows, self.cols), dtype=np.float32)
+        flagged = np.zeros((self.rows, self.cols), dtype=np.float32)
+        revealed = np.zeros((self.rows, self.cols), dtype=np.float32)
+        number_channels = [np.zeros((self.rows, self.cols), dtype=np.float32) for _ in range(9)]
+        
+        for row in range(self.rows):
+            for col in range(self.cols):
+                cell = self.game_board.get_cell(row, col)
+                if cell.is_revealed():
+                    revealed[row, col] = 1.0
+                    adj = cell.adjacent_mines
+                    if 0 <= adj <= 8:
+                        number_channels[adj][row, col] = 1.0
+                elif cell.is_flagged():
+                    flagged[row, col] = 1.0
+                else:
+                    hidden[row, col] = 1.0
+        
+        return np.stack([hidden, flagged, revealed] + number_channels, axis=-1)
+
     def get_valid_actions(self) -> List[Tuple[int, int, Action]]:
         """
         Get all valid actions in the current state

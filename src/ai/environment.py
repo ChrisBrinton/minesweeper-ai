@@ -17,7 +17,7 @@ class MinesweeperEnvironment:
     """
     
     def __init__(self, rows: int = 9, cols: int = 9, mines: int = 10, 
-                 reward_config: Optional[Dict[str, float]] = None):
+                 reward_config: Optional[Dict[str, float]] = None, **kwargs):
         """
         Initialize the environment
         
@@ -26,31 +26,48 @@ class MinesweeperEnvironment:
             cols: Number of columns in the game board
             mines: Number of mines to place
             reward_config: Custom reward configuration
+            use_v2: If True, use v2 state repr (12ch), reveal-only actions, sparse rewards
         """
         self.rows = rows
         self.cols = cols
         self.mines = mines
-        self.api = MinesweeperAPI(rows, cols, mines)        # Reward configuration
-        self.reward_config = reward_config or {
-            'win': 150.0,
-            'lose': -100.0,
-            'reveal_safe': 2.0,
-            'reveal_number': 4.0,
-            'reveal_multi_safe': 1.5,  # Per additional safe cell revealed in cascade
-            'reveal_empty_cell': 8.0,  # Bonus for clicking empty cell that causes cascade
-            'flag_correct': 5.0,
-            'flag_incorrect': -10.0,
-            'unflag_penalty': -2.0,  # Penalty for unflagging to discourage flag/unflag loops
-            'invalid_action': -1.0,
-            'step_penalty': -0.1
-        }
+        self.api = MinesweeperAPI(rows, cols, mines)
         
-        # Action space: (row, col, action_type)
-        # action_type: 0=reveal, 1=flag, 2=unflag
-        self.action_space_size = rows * cols * 3
+        # v2 flag: use new state repr and reveal-only actions
+        self.use_v2 = kwargs.get('use_v2', False)
         
-        # Observation space: 3D array [rows, cols, channels]
-        self.observation_space_shape = (rows, cols, 3)
+        if self.use_v2:
+            # Sparse reward configuration
+            self.reward_config = reward_config or {
+                'win': 1.0,
+                'lose': -1.0,
+                'reveal_safe': 0.01,
+                'invalid_action': -0.1,
+                'step_penalty': 0.0,
+            }
+            # Action space: reveal only
+            self.action_space_size = rows * cols
+            # Observation space: 12-channel one-hot
+            self.observation_space_shape = (rows, cols, 12)
+        else:
+            # Legacy reward configuration
+            self.reward_config = reward_config or {
+                'win': 150.0,
+                'lose': -100.0,
+                'reveal_safe': 2.0,
+                'reveal_number': 4.0,
+                'reveal_multi_safe': 1.5,
+                'reveal_empty_cell': 8.0,
+                'flag_correct': 5.0,
+                'flag_incorrect': -10.0,
+                'unflag_penalty': -2.0,
+                'invalid_action': -1.0,
+                'step_penalty': -0.1
+            }
+            # Action space: (row, col, action_type) — 0=reveal, 1=flag, 2=unflag
+            self.action_space_size = rows * cols * 3
+            # Observation space: 3D array [rows, cols, channels]
+            self.observation_space_shape = (rows, cols, 3)
         
         self.reset()
     
@@ -63,6 +80,13 @@ class MinesweeperEnvironment:
         self.api.reset_game()
         self.steps_taken = 0
         self.last_cells_revealed = 0
+        
+        # v2: Auto-reveal a random cell to place mines and give initial state
+        if self.use_v2:
+            row = random.randint(0, self.rows - 1)
+            col = random.randint(0, self.cols - 1)
+            self.api.take_action(row, col, Action.REVEAL)
+        
         return self._get_observation()
     
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
@@ -78,8 +102,13 @@ class MinesweeperEnvironment:
         self.steps_taken += 1
         
         # Decode action
-        row, col, action_type = self._decode_action(action)
-        action_enum = [Action.REVEAL, Action.FLAG, Action.UNFLAG][action_type]
+        if self.use_v2:
+            row, col = self._decode_action_v2(action)
+            action_type = 0
+            action_enum = Action.REVEAL
+        else:
+            row, col, action_type = self._decode_action(action)
+            action_enum = [Action.REVEAL, Action.FLAG, Action.UNFLAG][action_type]
         
         # Track cells revealed before action (for multi-cell reveal detection)
         cells_revealed_before = self.api.game_board.cells_revealed
@@ -92,7 +121,10 @@ class MinesweeperEnvironment:
         cells_newly_revealed = cells_revealed_after - cells_revealed_before
         
         # Calculate reward
-        reward = self._calculate_reward(result, row, col, action_enum, cells_newly_revealed)
+        if self.use_v2:
+            reward = self._calculate_reward_v2(result, cells_newly_revealed)
+        else:
+            reward = self._calculate_reward(result, row, col, action_enum, cells_newly_revealed)
         
         # Get new observation
         observation = self._get_observation()
@@ -109,7 +141,7 @@ class MinesweeperEnvironment:
             'cells_newly_revealed': cells_newly_revealed,
             'flags_used': self.api.game_board.flags_used,
             'steps_taken': self.steps_taken,
-            'reward_breakdown': self._get_reward_breakdown(result, row, col, action_enum, cells_newly_revealed)
+            'reward_breakdown': {} if self.use_v2 else self._get_reward_breakdown(result, row, col, action_enum, cells_newly_revealed)
         }
         
         if 'error' in result:
@@ -176,12 +208,20 @@ class MinesweeperEnvironment:
             Boolean array indicating valid actions
         """
         mask = np.zeros(self.action_space_size, dtype=bool)
-        valid_actions = self.api.get_valid_actions()
         
-        for row, col, action_enum in valid_actions:
-            action_type = [Action.REVEAL, Action.FLAG, Action.UNFLAG].index(action_enum)
-            action_idx = self._encode_action(row, col, action_type)
-            mask[action_idx] = True
+        if self.use_v2:
+            # v2: only reveal actions on hidden cells
+            for row in range(self.rows):
+                for col in range(self.cols):
+                    cell = self.api.game_board.get_cell(row, col)
+                    if cell.state.value == 'hidden':
+                        mask[self._encode_action_v2(row, col)] = True
+        else:
+            valid_actions = self.api.get_valid_actions()
+            for row, col, action_enum in valid_actions:
+                action_type = [Action.REVEAL, Action.FLAG, Action.UNFLAG].index(action_enum)
+                action_idx = self._encode_action(row, col, action_type)
+                mask[action_idx] = True
             
         return mask
     
@@ -192,17 +232,58 @@ class MinesweeperEnvironment:
         Returns:
             Random valid action
         """
-        valid_actions = self.api.get_valid_actions()
-        if not valid_actions:
-            return 0  # Default action if no valid actions
-        
-        row, col, action_enum = random.choice(valid_actions)
-        action_type = [Action.REVEAL, Action.FLAG, Action.UNFLAG].index(action_enum)
-        return self._encode_action(row, col, action_type)
+        if self.use_v2:
+            # v2: sample random hidden cell
+            hidden_cells = []
+            for row in range(self.rows):
+                for col in range(self.cols):
+                    cell = self.api.game_board.get_cell(row, col)
+                    if cell.state.value == 'hidden':
+                        hidden_cells.append((row, col))
+            if not hidden_cells:
+                return 0
+            row, col = random.choice(hidden_cells)
+            return self._encode_action_v2(row, col)
+        else:
+            valid_actions = self.api.get_valid_actions()
+            if not valid_actions:
+                return 0
+            row, col, action_enum = random.choice(valid_actions)
+            action_type = [Action.REVEAL, Action.FLAG, Action.UNFLAG].index(action_enum)
+            return self._encode_action(row, col, action_type)
     
     def _get_observation(self) -> np.ndarray:
         """Get current observation as numpy array"""
+        if self.use_v2:
+            return self.api.get_board_array_v2()
         return self.api.get_board_array()
+    
+    def _decode_action_v2(self, action: int) -> Tuple[int, int]:
+        """Decode v2 action integer to (row, col) — reveal only"""
+        col = action % self.cols
+        row = action // self.cols
+        return row, col
+    
+    def _encode_action_v2(self, row: int, col: int) -> int:
+        """Encode v2 action as single integer"""
+        return row * self.cols + col
+    
+    def _calculate_reward_v2(self, result: Dict[str, Any], cells_newly_revealed: int) -> float:
+        """Calculate sparse reward for v2 mode"""
+        if not result['success']:
+            return self.reward_config['invalid_action']
+        
+        game_state = self.api.game_board.game_state.value
+        
+        if game_state == 'won':
+            return self.reward_config['win']
+        elif game_state == 'lost':
+            return self.reward_config['lose']
+        elif cells_newly_revealed > 0:
+            return self.reward_config['reveal_safe']
+        else:
+            # Tried to reveal already-revealed cell
+            return self.reward_config['invalid_action']
     
     def _encode_action(self, row: int, col: int, action_type: int) -> int:
         """Encode action as single integer"""
