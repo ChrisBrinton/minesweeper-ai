@@ -130,3 +130,243 @@ Device: mps | Params: 3,464,835
 [small] Ep   2000/30000 | Win: 0.0% (best: 0.5% @500) | Loss: 0.01697 | Eps: 0.789 | Steps:     5922 | 60.1 eps/s | Elapsed: 0:00:31
 [small] Ep   2500/30000 | Win: 0.5% (best: 0.5% @500) | Loss: 0.01536 | Eps: 0.736 | Steps:     7605 | 51.7 eps/s | Elapsed: 0:00:43
 [small] Ep   3000/30000 | Win: 1.0% (best: 1.0% @3000) | Loss: 0.01623 | Eps: 0.683 | Steps:     9154 | 53.6 eps/s | Elapsed: 0:00:54
+[small] Ep   3500/30000 | Win: 0.5% (best: 1.0% @3000) | Loss: 0.01545 | Eps: 0.631 | Steps:    10805 | 48.1 eps/s | Elapsed: 0:01:06
+[small] Ep   4000/30000 | Win: 0.0% (best: 1.0% @3000) | Loss: 0.01590 | Eps: 0.578 | Steps:    12539 | 43.5 eps/s | Elapsed: 0:01:19
+[small] Ep   4500/30000 | Win: 0.5% (best: 1.0% @3000) | Loss: 0.01529 | Eps: 0.525 | Steps:    14327 | 42.7 eps/s | Elapsed: 0:01:33
+[small] Ep   5000/30000 | Win: 1.5% (best: 1.5% @5000) | Loss: 0.01526 | Eps: 0.472 | Steps:    16119 | 39.7 eps/s | Elapsed: 0:01:47
+[small] Ep   5500/30000 | Win: 1.5% (best: 1.5% @5000) | Loss: 0.01519 | Eps: 0.419 | Steps:    17947 | 37.7 eps/s | Elapsed: 0:02:02
+[small] Ep   6000/30000 | Win: 1.0% (best: 1.5% @5000) | Loss: 0.01496 | Eps: 0.367 | Steps:    19747 | 38.4 eps/s | Elapsed: 0:02:17
+[small] Ep   6500/30000 | Win: 1.5% (best: 1.5% @5000) | Loss: 0.01394 | Eps: 0.314 | Steps:    21721 | 31.9 eps/s | Elapsed: 0:02:35
+[small] Ep   7000/30000 | Win: 2.0% (best: 2.0% @7000) | Loss: 0.01471 | Eps: 0.261 | Steps:    23661 | 33.2 eps/s | Elapsed: 0:02:51
+[small] Ep   7500/30000 | Win: 1.5% (best: 2.0% @7000) | Loss: 0.01426 | Eps: 0.208 | Steps:    25918 | 26.1 eps/s | Elapsed: 0:03:13
+[small] Ep   8000/30000 | Win: 5.0% (best: 5.0% @8000) | Loss: 0.01411 | Eps: 0.156 | Steps:    27982 | 27.7 eps/s | Elapsed: 0:03:33
+[small] Ep   8500/30000 | Win: 2.0% (best: 5.0% @8000) | Loss: 0.01330 | Eps: 0.103 | Steps:    30357 | 24.1 eps/s | Elapsed: 0:03:55
+[small] Ep   9000/30000 | Win: 2.5% (best: 5.0% @8000) | Loss: 0.01377 | Eps: 0.050 | Steps:    32731 | 24.4 eps/s | Elapsed: 0:04:18
+[small] Ep   9500/30000 | Win: 6.0% (best: 6.0% @9500) | Loss: 0.01302 | Eps: 0.050 | Steps:    35112 | 23.6 eps/s | Elapsed: 0:04:41
+[small] Ep  10000/30000 | Win: 0.5% (best: 6.0% @9500) | Loss: 0.01386 | Eps: 0.050 | Steps:    37558 | 23.1 eps/s | Elapsed: 0:05:05
+[small] Ep  10500/30000 | Win: 5.5% (best: 6.0% @9500) | Loss: 0.01291 | Eps: 0.050 | Steps:    40065 | 21.7 eps/s | Elapsed: 0:05:30
+[small] Ep  11000/30000 | Win: 6.0% (best: 6.0% @9500) | Loss: 0.01320 | Eps: 0.050 | Steps:    42406 | 23.6 eps/s | Elapsed: 0:05:53
+[small] Ep  11500/30000 | Win: 4.5% (best: 6.0% @9500) | Loss: 0.01312 | Eps: 0.050 | Steps:    44835 | 23.0 eps/s | Elapsed: 0:06:17
+[small] Ep  12000/30000 | Win: 3.5% (best: 6.0% @9500) | Loss: 0.01213 | Eps: 0.050 | Steps:    47360 | 22.4 eps/s | Elapsed: 0:06:41
+[small] Ep  12500/30000 | Win: 4.5% (best: 6.0% @9500) | Loss: 0.01236 | Eps: 0.050 | Steps:    49903 | 22.1 eps/s | Elapsed: 0:07:06
+[small] Ep  13000/30000 | Win: 5.0% (best: 6.0% @9500) | Loss: 0.01151 | Eps: 0.050 | Steps:    52488 | 20.6 eps/s | Elapsed: 0:07:33
+[small] Ep  13500/30000 | Win: 4.5% (best: 6.0% @9500) | Loss: 0.01113 | Eps: 0.050 | Steps:    54947 | 22.4 eps/s | Elapsed: 0:07:57
+[small] Ep  14000/30000 | Win: 6.5% (best: 6.5% @14000) | Loss: 0.01081 | Eps: 0.050 | Steps:    57483 | 21.8 eps/s | Elapsed: 0:08:22
+[small] Ep  14500/30000 | Win: 6.0% (best: 6.5% @14000) | Loss: 0.01102 | Eps: 0.050 | Steps:    59983 | 22.8 eps/s | Elapsed: 0:08:46
+[small] Ep  15000/30000 | Win: 3.5% (best: 6.5% @14000) | Loss: 0.00996 | Eps: 0.050 | Steps:    62462 | 22.1 eps/s | Elapsed: 0:09:11
+[small] Ep  15500/30000 | Win: 6.0% (best: 6.5% @14000) | Loss: 0.00968 | Eps: 0.050 | Steps:    65062 | 21.4 eps/s | Elapsed: 0:09:36
+[small] Ep  16000/30000 | Win: 5.5% (best: 6.5% @14000) | Loss: 0.00920 | Eps: 0.050 | Steps:    67608 | 21.4 eps/s | Elapsed: 0:10:02
+[small] Ep  16500/30000 | Win: 3.0% (best: 6.5% @14000) | Loss: 0.00846 | Eps: 0.050 | Steps:    70195 | 22.0 eps/s | Elapsed: 0:10:27
+[small] Ep  17000/30000 | Win: 5.5% (best: 6.5% @14000) | Loss: 0.00795 | Eps: 0.050 | Steps:    72729 | 21.1 eps/s | Elapsed: 0:10:53
+[small] Ep  17500/30000 | Win: 3.5% (best: 6.5% @14000) | Loss: 0.00722 | Eps: 0.050 | Steps:    75308 | 20.9 eps/s | Elapsed: 0:11:19
+[small] Ep  18000/30000 | Win: 4.5% (best: 6.5% @14000) | Loss: 0.00626 | Eps: 0.050 | Steps:    77844 | 21.4 eps/s | Elapsed: 0:11:44
+[small] Ep  18500/30000 | Win: 3.5% (best: 6.5% @14000) | Loss: 0.00604 | Eps: 0.050 | Steps:    80339 | 22.7 eps/s | Elapsed: 0:12:09
+[small] Ep  19000/30000 | Win: 8.0% (best: 8.0% @19000) | Loss: 0.00461 | Eps: 0.050 | Steps:    82901 | 21.9 eps/s | Elapsed: 0:12:34
+[small] Ep  19500/30000 | Win: 6.5% (best: 8.0% @19000) | Loss: 0.00427 | Eps: 0.050 | Steps:    85276 | 23.5 eps/s | Elapsed: 0:12:57
+[small] Ep  20000/30000 | Win: 3.0% (best: 8.0% @19000) | Loss: 0.00306 | Eps: 0.050 | Steps:    87680 | 22.4 eps/s | Elapsed: 0:13:21
+[small] Ep  20500/30000 | Win: 6.5% (best: 8.0% @19000) | Loss: 0.00292 | Eps: 0.050 | Steps:    90028 | 24.3 eps/s | Elapsed: 0:13:44
+[small] Ep  21000/30000 | Win: 4.5% (best: 8.0% @19000) | Loss: 0.00290 | Eps: 0.050 | Steps:    92380 | 23.3 eps/s | Elapsed: 0:14:08
+[small] Ep  21500/30000 | Win: 3.0% (best: 8.0% @19000) | Loss: 0.00260 | Eps: 0.050 | Steps:    94769 | 23.5 eps/s | Elapsed: 0:14:31
+[small] Ep  22000/30000 | Win: 5.0% (best: 8.0% @19000) | Loss: 0.00296 | Eps: 0.050 | Steps:    96969 | 25.4 eps/s | Elapsed: 0:14:52
+[small] Ep  22500/30000 | Win: 4.0% (best: 8.0% @19000) | Loss: 0.00245 | Eps: 0.050 | Steps:    99124 | 25.6 eps/s | Elapsed: 0:15:14
+[small] Ep  23000/30000 | Win: 2.5% (best: 8.0% @19000) | Loss: 0.00242 | Eps: 0.050 | Steps:   101347 | 24.2 eps/s | Elapsed: 0:15:36
+[small] Ep  23500/30000 | Win: 4.5% (best: 8.0% @19000) | Loss: 0.00263 | Eps: 0.050 | Steps:   103568 | 24.6 eps/s | Elapsed: 0:15:59
+[small] Ep  24000/30000 | Win: 4.0% (best: 8.0% @19000) | Loss: 0.00297 | Eps: 0.050 | Steps:   105784 | 25.1 eps/s | Elapsed: 0:16:20
+⏸️  PATIENCE EXCEEDED. Best: 8.0% @ep19000. Moving on.
+
+──────────────────────────────────────────────────────────────────────
+Stage small COMPLETE | Best win rate: 8.0% @ep19000
+Total steps: 105,784 | Time: 0:16:20
+──────────────────────────────────────────────────────────────────────
+
+
+======================================================================
+Stage: mini (8×8, 9 mines)
+Target: 40% win rate | Max episodes: 40000
+Device: mps | Params: 4,455,585
+======================================================================
+
+[mini] Ep    500/40000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.03929 | Eps: 0.960 | Steps:     1573 | 110.8 eps/s | Elapsed: 0:00:05
+[mini] Ep   1000/40000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01589 | Eps: 0.921 | Steps:     3192 | 55.3 eps/s | Elapsed: 0:00:16
+[mini] Ep   1500/40000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01671 | Eps: 0.881 | Steps:     4825 | 54.4 eps/s | Elapsed: 0:00:27
+[mini] Ep   2000/40000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01670 | Eps: 0.842 | Steps:     6323 | 59.0 eps/s | Elapsed: 0:00:37
+[mini] Ep   2500/40000 | Win: 0.5% (best: 0.5% @2500) | Loss: 0.01576 | Eps: 0.802 | Steps:     7969 | 49.1 eps/s | Elapsed: 0:00:49
+[mini] Ep   3000/40000 | Win: 0.0% (best: 0.5% @2500) | Loss: 0.01604 | Eps: 0.762 | Steps:     9621 | 48.1 eps/s | Elapsed: 0:01:01
+[mini] Ep   3500/40000 | Win: 0.0% (best: 0.5% @2500) | Loss: 0.01494 | Eps: 0.723 | Steps:    11380 | 45.6 eps/s | Elapsed: 0:01:14
+[mini] Ep   4000/40000 | Win: 0.5% (best: 0.5% @2500) | Loss: 0.01494 | Eps: 0.683 | Steps:    13091 | 45.0 eps/s | Elapsed: 0:01:27
+[mini] Ep   4500/40000 | Win: 0.0% (best: 0.5% @2500) | Loss: 0.01389 | Eps: 0.644 | Steps:    14801 | 43.6 eps/s | Elapsed: 0:01:40
+[mini] Ep   5000/40000 | Win: 0.5% (best: 0.5% @2500) | Loss: 0.01490 | Eps: 0.604 | Steps:    16590 | 41.2 eps/s | Elapsed: 0:01:54
+[mini] Ep   5500/40000 | Win: 1.0% (best: 1.0% @5500) | Loss: 0.01387 | Eps: 0.565 | Steps:    18451 | 36.8 eps/s | Elapsed: 0:02:10
+[mini] Ep   6000/40000 | Win: 0.5% (best: 1.0% @5500) | Loss: 0.01445 | Eps: 0.525 | Steps:    20335 | 37.2 eps/s | Elapsed: 0:02:25
+[mini] Ep   6500/40000 | Win: 0.0% (best: 1.0% @5500) | Loss: 0.01407 | Eps: 0.485 | Steps:    22239 | 36.0 eps/s | Elapsed: 0:02:41
+[mini] Ep   7000/40000 | Win: 0.5% (best: 1.0% @5500) | Loss: 0.01334 | Eps: 0.446 | Steps:    24267 | 32.2 eps/s | Elapsed: 0:02:59
+[mini] Ep   7500/40000 | Win: 0.5% (best: 1.0% @5500) | Loss: 0.01337 | Eps: 0.406 | Steps:    26199 | 33.0 eps/s | Elapsed: 0:03:16
+[mini] Ep   8000/40000 | Win: 0.0% (best: 1.0% @5500) | Loss: 0.01352 | Eps: 0.367 | Steps:    28229 | 31.7 eps/s | Elapsed: 0:03:33
+[mini] Ep   8500/40000 | Win: 0.0% (best: 1.0% @5500) | Loss: 0.01331 | Eps: 0.327 | Steps:    30256 | 30.8 eps/s | Elapsed: 0:03:52
+[mini] Ep   9000/40000 | Win: 0.5% (best: 1.0% @5500) | Loss: 0.01358 | Eps: 0.288 | Steps:    32307 | 29.0 eps/s | Elapsed: 0:04:11
+[mini] Ep   9500/40000 | Win: 0.5% (best: 1.0% @5500) | Loss: 0.01324 | Eps: 0.248 | Steps:    34480 | 27.6 eps/s | Elapsed: 0:04:31
+[mini] Ep  10000/40000 | Win: 0.0% (best: 1.0% @5500) | Loss: 0.01306 | Eps: 0.208 | Steps:    36552 | 28.1 eps/s | Elapsed: 0:04:51
+[mini] Ep  10500/40000 | Win: 0.5% (best: 1.0% @5500) | Loss: 0.01305 | Eps: 0.169 | Steps:    38697 | 26.6 eps/s | Elapsed: 0:05:11
+[mini] Ep  11000/40000 | Win: 0.0% (best: 1.0% @5500) | Loss: 0.01180 | Eps: 0.129 | Steps:    41070 | 23.7 eps/s | Elapsed: 0:05:35
+[mini] Ep  11500/40000 | Win: 0.5% (best: 1.0% @5500) | Loss: 0.01257 | Eps: 0.090 | Steps:    43400 | 23.1 eps/s | Elapsed: 0:05:58
+[mini] Ep  12000/40000 | Win: 0.0% (best: 1.0% @5500) | Loss: 0.01230 | Eps: 0.050 | Steps:    45722 | 22.5 eps/s | Elapsed: 0:06:22
+[mini] Ep  12500/40000 | Win: 0.0% (best: 1.0% @5500) | Loss: 0.01195 | Eps: 0.050 | Steps:    48112 | 22.0 eps/s | Elapsed: 0:06:47
+⏸️  PATIENCE EXCEEDED. Best: 1.0% @ep5500. Moving on.
+
+──────────────────────────────────────────────────────────────────────
+Stage mini COMPLETE | Best win rate: 1.0% @ep5500
+Total steps: 48,112 | Time: 0:06:47
+──────────────────────────────────────────────────────────────────────
+
+
+======================================================================
+Stage: beginner (9×9, 10 mines)
+Target: 35% win rate | Max episodes: 60000
+Device: mps | Params: 5,578,435
+======================================================================
+
+[beginner] Ep   1000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01437 | Eps: 0.947 | Steps:     3189 | 69.0 eps/s | Elapsed: 0:00:16
+[beginner] Ep   2000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01349 | Eps: 0.894 | Steps:     6672 | 47.2 eps/s | Elapsed: 0:00:40
+[beginner] Ep   3000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01379 | Eps: 0.842 | Steps:    10165 | 45.2 eps/s | Elapsed: 0:01:05
+[beginner] Ep   4000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01302 | Eps: 0.789 | Steps:    13611 | 43.4 eps/s | Elapsed: 0:01:31
+[beginner] Ep   5000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01308 | Eps: 0.736 | Steps:    17255 | 39.8 eps/s | Elapsed: 0:01:59
+[beginner] Ep   6000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01283 | Eps: 0.683 | Steps:    20798 | 39.6 eps/s | Elapsed: 0:02:27
+[beginner] Ep   7000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01258 | Eps: 0.631 | Steps:    24314 | 39.2 eps/s | Elapsed: 0:02:56
+[beginner] Ep   8000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01252 | Eps: 0.578 | Steps:    28088 | 35.2 eps/s | Elapsed: 0:03:27
+[beginner] Ep   9000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01200 | Eps: 0.525 | Steps:    31931 | 33.3 eps/s | Elapsed: 0:04:00
+[beginner] Ep  10000/60000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01141 | Eps: 0.472 | Steps:    35820 | 32.5 eps/s | Elapsed: 0:04:34
+⏸️  PATIENCE EXCEEDED. Best: 0.0% @ep0. Moving on.
+
+──────────────────────────────────────────────────────────────────────
+Stage beginner COMPLETE | Best win rate: 0.0% @ep0
+Total steps: 35,820 | Time: 0:04:34
+──────────────────────────────────────────────────────────────────────
+
+
+======================================================================
+Stage: intermediate (16×16, 40 mines)
+Target: 20% win rate | Max episodes: 150000
+Device: mps | Params: 17,137,185
+======================================================================
+
+[intermediate] Ep   2000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01722 | Eps: 0.958 | Steps:     8909 | 16.7 eps/s | Elapsed: 0:02:09
+[intermediate] Ep   4000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01797 | Eps: 0.916 | Steps:    17991 | 13.2 eps/s | Elapsed: 0:04:50
+[intermediate] Ep   6000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.01841 | Eps: 0.873 | Steps:    26967 | 15.2 eps/s | Elapsed: 0:07:10
+[intermediate] Ep   8000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.02021 | Eps: 0.831 | Steps:    35918 | 12.5 eps/s | Elapsed: 0:09:59
+[intermediate] Ep  10000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.02164 | Eps: 0.789 | Steps:    44982 | 11.1 eps/s | Elapsed: 0:13:09
+[intermediate] Ep  12000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.02501 | Eps: 0.747 | Steps:    54273 | 14.5 eps/s | Elapsed: 0:15:36
+[intermediate] Ep  14000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.03326 | Eps: 0.704 | Steps:    63082 | 15.0 eps/s | Elapsed: 0:17:58
+[intermediate] Ep  16000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.04282 | Eps: 0.662 | Steps:    71923 | 14.6 eps/s | Elapsed: 0:20:24
+[intermediate] Ep  18000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.06653 | Eps: 0.620 | Steps:    81313 | 13.7 eps/s | Elapsed: 0:22:59
+[intermediate] Ep  20000/150000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.10394 | Eps: 0.578 | Steps:    90390 | 14.0 eps/s | Elapsed: 0:25:32
+⏸️  PATIENCE EXCEEDED. Best: 0.0% @ep0. Moving on.
+
+──────────────────────────────────────────────────────────────────────
+Stage intermediate COMPLETE | Best win rate: 0.0% @ep0
+Total steps: 90,390 | Time: 0:25:32
+──────────────────────────────────────────────────────────────────────
+
+
+======================================================================
+Stage: expert (16×30, 99 mines)
+Target: 10% win rate | Max episodes: 300000
+Device: mps | Params: 31,932,385
+======================================================================
+
+[expert] Ep   5000/300000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.02230 | Eps: 0.947 | Steps:    21339 | 10.1 eps/s | Elapsed: 0:08:23
+[expert] Ep  10000/300000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.03997 | Eps: 0.894 | Steps:    42733 | 9.7 eps/s | Elapsed: 0:17:08
+[expert] Ep  15000/300000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.13220 | Eps: 0.842 | Steps:    64230 | 9.5 eps/s | Elapsed: 0:26:01
+[expert] Ep  20000/300000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.40317 | Eps: 0.789 | Steps:    86065 | 9.3 eps/s | Elapsed: 0:35:06
+[expert] Ep  25000/300000 | Win: 0.0% (best: 0.0% @0) | Loss: 0.85326 | Eps: 0.736 | Steps:   107609 | 9.4 eps/s | Elapsed: 0:44:08
+[expert] Ep  30000/300000 | Win: 0.0% (best: 0.0% @0) | Loss: 1.43704 | Eps: 0.683 | Steps:   129196 | 9.3 eps/s | Elapsed: 0:53:18
+[expert] Ep  35000/300000 | Win: 0.0% (best: 0.0% @0) | Loss: 1.79272 | Eps: 0.631 | Steps:   150230 | 9.4 eps/s | Elapsed: 1:02:20
+[expert] Ep  40000/300000 | Win: 0.0% (best: 0.0% @0) | Loss: 1.96488 | Eps: 0.578 | Steps:   172017 | 9.0 eps/s | Elapsed: 1:11:45
+⏸️  PATIENCE EXCEEDED. Best: 0.0% @ep0. Moving on.
+
+──────────────────────────────────────────────────────────────────────
+Stage expert COMPLETE | Best win rate: 0.0% @ep0
+Total steps: 172,017 | Time: 1:11:45
+──────────────────────────────────────────────────────────────────────
+
+
+======================================================================
+CURRICULUM COMPLETE: 2026-01-31 13:34:45
+Total time: 2:05:43
+
+             tiny: 65.0% win rate (ep 3000, 0:00:41)
+            small: 8.0% win rate (ep 19000, 0:16:20)
+             mini: 1.0% win rate (ep 5500, 0:06:47)
+         beginner: 0.0% win rate (ep 0, 0:04:34)
+     intermediate: 0.0% win rate (ep 0, 0:25:32)
+           expert: 0.0% win rate (ep 0, 1:11:45)
+
+======================================================================
+
+
+======================================================================
+CURRICULUM TRAINING START: 2026-02-01 06:46:15
+Device: mps
+Stages: 0 → 1
+======================================================================
+
+
+======================================================================
+Stage: tiny (5×5, 3 mines)
+Target: 60% win rate | Max episodes: 15000
+Device: mps | Params: 52,066
+======================================================================
+
+[tiny] Ep    500/15000 | Win: 17.5% (best: 17.5% @500) | Loss: 0.16605 | Eps: 0.894 | Steps:     1110 | 326.2 eps/s | Elapsed: 0:00:02
+[tiny] Ep   1000/15000 | Win: 36.0% (best: 36.0% @1000) | Loss: 0.08073 | Eps: 0.789 | Steps:     2273 | 169.7 eps/s | Elapsed: 0:00:06
+[tiny] Ep   1500/15000 | Win: 55.5% (best: 55.5% @1500) | Loss: 0.07115 | Eps: 0.683 | Steps:     3456 | 137.0 eps/s | Elapsed: 0:00:11
+[tiny] Ep   2000/15000 | Win: 65.5% (best: 65.5% @2000) | Loss: 0.09084 | Eps: 0.578 | Steps:     4837 | 104.7 eps/s | Elapsed: 0:00:17
+🎯 TARGET REACHED! tiny: 65.5% >= 60%
+
+──────────────────────────────────────────────────────────────────────
+Stage tiny COMPLETE | Best win rate: 65.5% @ep2000
+Total steps: 4,837 | Time: 0:00:17
+──────────────────────────────────────────────────────────────────────
+
+
+======================================================================
+CURRICULUM TRAINING START: 2026-02-01 06:46:50
+Device: mps
+Stages: 0 → 1
+======================================================================
+
+
+======================================================================
+Stage: tiny (5×5, 3 mines)
+Target: 60% win rate | Max episodes: 15000
+Device: mps | Params: 52,066
+======================================================================
+
+[tiny] Ep    500/15000 | Win: 14.5% (best: 14.5% @500) | Loss: 0.17911 | Eps: 0.894 | Steps:     1131 | 770.6 eps/s | Elapsed: 0:00:01
+[tiny] Ep   1000/15000 | Win: 46.5% (best: 46.5% @1000) | Loss: 0.08255 | Eps: 0.789 | Steps:     2317 | 162.0 eps/s | Elapsed: 0:00:05
+[tiny] Ep   1500/15000 | Win: 63.5% (best: 63.5% @1500) | Loss: 0.07302 | Eps: 0.683 | Steps:     3544 | 128.8 eps/s | Elapsed: 0:00:10
+🎯 TARGET REACHED! tiny: 63.5% >= 60%
+
+──────────────────────────────────────────────────────────────────────
+Stage tiny COMPLETE | Best win rate: 63.5% @ep1500
+Total steps: 3,544 | Time: 0:00:10
+──────────────────────────────────────────────────────────────────────
+
+
+======================================================================
+Stage: small (7×7, 7 mines)
+Target: 45% win rate | Max episodes: 30000
+Device: mps | Params: 52,066
+======================================================================
+
+[small] Ep    500/30000 | Win: 5.5% (best: 5.5% @500) | Loss: 0.14047 | Eps: 0.947 | Steps:     1490 | 269.1 eps/s | Elapsed: 0:00:03
+[small] Ep   1000/30000 | Win: 10.5% (best: 10.5% @1000) | Loss: 0.29003 | Eps: 0.894 | Steps:     3068 | 109.3 eps/s | Elapsed: 0:00:10
+[small] Ep   1500/30000 | Win: 13.5% (best: 13.5% @1500) | Loss: 0.62337 | Eps: 0.842 | Steps:     4674 | 101.5 eps/s | Elapsed: 0:00:17
+[small] Ep   2000/30000 | Win: 14.0% (best: 14.0% @2000) | Loss: 1.14409 | Eps: 0.789 | Steps:     6283 | 93.2 eps/s | Elapsed: 0:00:25
+[small] Ep   2500/30000 | Win: 14.5% (best: 14.5% @2500) | Loss: 1.84144 | Eps: 0.736 | Steps:     7980 | 84.8 eps/s | Elapsed: 0:00:33
+[small] Ep   3000/30000 | Win: 19.0% (best: 19.0% @3000) | Loss: 2.73419 | Eps: 0.683 | Steps:     9657 | 80.6 eps/s | Elapsed: 0:00:42
+[small] Ep   3500/30000 | Win: 21.0% (best: 21.0% @3500) | Loss: 3.95282 | Eps: 0.631 | Steps:    11482 | 71.1 eps/s | Elapsed: 0:00:51
+[small] Ep   4000/30000 | Win: 26.0% (best: 26.0% @4000) | Loss: 5.57257 | Eps: 0.578 | Steps:    13334 | 66.1 eps/s | Elapsed: 0:01:01
+[small] Ep   4500/30000 | Win: 23.0% (best: 26.0% @4000) | Loss: 7.85341 | Eps: 0.525 | Steps:    15352 | 59.6 eps/s | Elapsed: 0:01:12
+[small] Ep   5000/30000 | Win: 30.0% (best: 30.0% @5000) | Loss: 10.59458 | Eps: 0.472 | Steps:    17387 | 55.7 eps/s | Elapsed: 0:01:24
+[small] Ep   5500/30000 | Win: 24.5% (best: 30.0% @5000) | Loss: 14.72292 | Eps: 0.419 | Steps:    19737 | 46.6 eps/s | Elapsed: 0:01:37
+[small] Ep   6000/30000 | Win: 26.5% (best: 30.0% @5000) | Loss: 20.09064 | Eps: 0.367 | Steps:    22032 | 46.2 eps/s | Elapsed: 0:01:50

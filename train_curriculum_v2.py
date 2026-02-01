@@ -21,6 +21,7 @@ import os
 import sys
 import json
 import time
+import copy
 import argparse
 from datetime import datetime, timedelta
 
@@ -34,7 +35,7 @@ from collections import deque, namedtuple
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.ai.environment import MinesweeperEnvironment
-from src.ai.models import DQN
+from src.ai.models_v2 import MinesweeperFCN
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -145,20 +146,9 @@ def create_env(stage):
     return env
 
 
-def create_model(env, device):
-    """Create a DQN model for the given environment."""
-    obs = env.reset()
-    input_channels = obs.shape[-1]  # 12 for v2
-    rows, cols = env.rows, env.cols
-    num_actions = rows * cols  # reveal only
-    
-    model = DQN(
-        board_height=rows,
-        board_width=cols,
-        input_channels=input_channels,
-        num_actions=num_actions
-    ).to(device)
-    
+def create_model(device, input_channels=12):
+    """Create a fully convolutional DQN model (works for any board size)."""
+    model = MinesweeperFCN(input_channels=input_channels).to(device)
     return model
 
 
@@ -174,7 +164,8 @@ def select_action(state, model, env, epsilon, device):
     
     with torch.no_grad():
         state_tensor = torch.FloatTensor(state).permute(2, 0, 1).unsqueeze(0).contiguous().to(device)
-        q_values = model(state_tensor).squeeze(0)
+        q_values = model(state_tensor).squeeze(0)  # [H, W]
+        q_values = q_values.reshape(-1)  # [H*W] — flat action space
         
         valid_mask = torch.tensor(action_mask, dtype=torch.bool, device=device)
         q_values[~valid_mask] = float('-inf')
@@ -182,7 +173,7 @@ def select_action(state, model, env, epsilon, device):
 
 
 def train_step(model, target_model, optimizer, memory, config, device):
-    """Single training step."""
+    """Single training step. Handles variable board sizes in replay buffer."""
     if len(memory) < config['min_memory_size']:
         return None
     
@@ -194,13 +185,22 @@ def train_step(model, target_model, optimizer, memory, config, device):
     next_states = torch.FloatTensor(np.array([e.next_state for e in batch])).permute(0, 3, 1, 2).contiguous().to(device)
     dones = torch.BoolTensor([e.done for e in batch]).to(device)
     
-    # Current Q-values
-    current_q = model(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+    # FCN outputs [B, H, W] — flatten to [B, H*W] for action indexing
+    current_q_map = model(states)  # [B, H, W]
+    B = current_q_map.shape[0]
+    current_q_flat = current_q_map.reshape(B, -1)  # [B, H*W]
+    current_q = current_q_flat.gather(1, actions.unsqueeze(1)).squeeze(1)
     
     # Target Q-values (Double DQN)
     with torch.no_grad():
-        best_actions = model(next_states).argmax(1)
-        next_q = target_model(next_states).gather(1, best_actions.unsqueeze(1)).squeeze(1)
+        next_q_map = model(next_states)  # [B, H, W]
+        next_q_flat = next_q_map.reshape(B, -1)
+        best_actions = next_q_flat.argmax(1)
+        
+        next_target_map = target_model(next_states)  # [B, H, W]
+        next_target_flat = next_target_map.reshape(B, -1)
+        next_q = next_target_flat.gather(1, best_actions.unsqueeze(1)).squeeze(1)
+        
         target_q = rewards + config['gamma'] * next_q * (~dones)
     
     loss = nn.SmoothL1Loss()(current_q, target_q)
@@ -232,7 +232,8 @@ def evaluate(model, env, num_episodes, device):
         while not done and steps < 500:
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(state).permute(2, 0, 1).unsqueeze(0).contiguous().to(device)
-                q_values = model(state_tensor).squeeze(0)
+                q_values = model(state_tensor).squeeze(0)  # [H, W]
+                q_values = q_values.reshape(-1)  # [H*W]
                 
                 action_mask = env.get_action_mask()
                 valid_mask = torch.tensor(action_mask, dtype=torch.bool, device=device)
@@ -250,14 +251,19 @@ def evaluate(model, env, num_episodes, device):
     return wins / num_episodes
 
 
-def train_stage(stage, device, save_dir, log_file):
-    """Train a single curriculum stage."""
+def train_stage(stage, device, save_dir, log_file, prev_model=None):
+    """Train a single curriculum stage. Transfers weights from prev_model if provided."""
     config = TRAINING_CONFIG.copy()
     
     env = create_env(stage)
-    model = create_model(env, device)
-    target_model = create_model(env, device)
-    target_model.load_state_dict(model.state_dict())
+    
+    if prev_model is not None:
+        # Transfer weights from previous stage (FCN works for any board size!)
+        model = prev_model
+    else:
+        model = create_model(device)
+    
+    target_model = copy.deepcopy(model)
     target_model.eval()
     
     optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
@@ -380,7 +386,7 @@ def train_stage(stage, device, save_dir, log_file):
     log_file.write(msg + '\n')
     log_file.flush()
     
-    return best_win_rate, best_episode, stage_time
+    return best_win_rate, best_episode, stage_time, model
 
 
 def main():
@@ -410,10 +416,13 @@ def main():
         
         results = {}
         curriculum_start = time.time()
+        prev_model = None  # Will carry FCN weights between stages
         
         for i in range(args.start_stage, end_stage + 1):
             stage = CURRICULUM_STAGES[i]
-            win_rate, best_ep, stage_time = train_stage(stage, device, save_dir, log_file)
+            win_rate, best_ep, stage_time, prev_model = train_stage(
+                stage, device, save_dir, log_file, prev_model=prev_model
+            )
             results[stage['name']] = {
                 'win_rate': win_rate,
                 'best_episode': best_ep,
