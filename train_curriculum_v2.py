@@ -47,7 +47,8 @@ CURRICULUM_STAGES = [
         'max_episodes': 15000,
         'eval_every': 500,
         'eval_episodes': 200,
-        'patience': 3000,  # episodes without improvement before advancing anyway
+        'patience': 3000,
+        'learning_rate': 1e-4,
     },
     {
         'name': 'small', 
@@ -57,6 +58,7 @@ CURRICULUM_STAGES = [
         'eval_every': 500,
         'eval_episodes': 200,
         'patience': 5000,
+        'learning_rate': 1e-4,
     },
     {
         'name': 'mini',
@@ -66,6 +68,7 @@ CURRICULUM_STAGES = [
         'eval_every': 500,
         'eval_episodes': 200,
         'patience': 7000,
+        'learning_rate': 1e-4,
     },
     {
         'name': 'beginner',
@@ -75,29 +78,32 @@ CURRICULUM_STAGES = [
         'eval_every': 1000,
         'eval_episodes': 300,
         'patience': 10000,
+        'learning_rate': 5e-5,
     },
     {
         'name': 'intermediate',
         'rows': 16, 'cols': 16, 'mines': 40,
         'target_win_rate': 0.20,
-        'max_episodes': 150000,
+        'max_episodes': 300000,
         'eval_every': 2000,
         'eval_episodes': 300,
-        'patience': 20000,
+        'patience': 40000,
+        'learning_rate': 3e-5,
     },
     {
         'name': 'expert',
         'rows': 16, 'cols': 30, 'mines': 99,
         'target_win_rate': 0.10,
-        'max_episodes': 300000,
+        'max_episodes': 500000,
         'eval_every': 5000,
         'eval_episodes': 500,
-        'patience': 40000,
+        'patience': 80000,
+        'learning_rate': 1e-5,
     },
 ]
 
 TRAINING_CONFIG = {
-    'learning_rate': 1e-4,
+    'learning_rate': 1e-4,       # Default; overridden per stage
     'batch_size': 128,
     'gamma': 0.99,
     'epsilon_start': 1.0,
@@ -108,6 +114,11 @@ TRAINING_CONFIG = {
     'memory_size': 200000,
     'min_memory_size': 1000,
     'max_steps_per_episode': 500,
+    # Phase 3: Stability controls
+    'reward_clip': (-1.0, 1.0),       # Clip rewards to this range
+    'target_q_clip': (-10.0, 10.0),   # Clip target Q-values
+    'warmup_episodes': 1000,          # LR warmup period per stage
+    'milestone_threshold': 0.05,      # Save milestone every 5% win rate improvement
 }
 
 # ─── Replay Buffer ───────────────────────────────────────────────────────────
@@ -138,10 +149,10 @@ def get_device(preference='auto'):
 
 
 def create_env(stage):
-    """Create environment for a curriculum stage."""
+    """Create environment for a curriculum stage with reward normalization."""
     env = MinesweeperEnvironment(
         rows=stage['rows'], cols=stage['cols'], mines=stage['mines'],
-        use_v2=True
+        use_v2=True, normalize_rewards=True
     )
     return env
 
@@ -173,7 +184,7 @@ def select_action(state, model, env, epsilon, device):
 
 
 def train_step(model, target_model, optimizer, memory, config, device):
-    """Single training step. Handles variable board sizes in replay buffer."""
+    """Single training step with reward clipping and target Q clipping."""
     if len(memory) < config['min_memory_size']:
         return None
     
@@ -184,6 +195,10 @@ def train_step(model, target_model, optimizer, memory, config, device):
     rewards = torch.FloatTensor([e.reward for e in batch]).to(device)
     next_states = torch.FloatTensor(np.array([e.next_state for e in batch])).permute(0, 3, 1, 2).contiguous().to(device)
     dones = torch.BoolTensor([e.done for e in batch]).to(device)
+    
+    # Phase 3: Clip rewards
+    r_lo, r_hi = config['reward_clip']
+    rewards = rewards.clamp(r_lo, r_hi)
     
     # FCN outputs [B, H, W] — flatten to [B, H*W] for action indexing
     current_q_map = model(states)  # [B, H, W]
@@ -202,6 +217,10 @@ def train_step(model, target_model, optimizer, memory, config, device):
         next_q = next_target_flat.gather(1, best_actions.unsqueeze(1)).squeeze(1)
         
         target_q = rewards + config['gamma'] * next_q * (~dones)
+        
+        # Phase 3: Clip target Q-values to prevent explosion
+        tq_lo, tq_hi = config['target_q_clip']
+        target_q = target_q.clamp(tq_lo, tq_hi)
     
     loss = nn.SmoothL1Loss()(current_q, target_q)
     
@@ -252,8 +271,18 @@ def evaluate(model, env, num_episodes, device):
 
 
 def train_stage(stage, device, save_dir, log_file, prev_model=None):
-    """Train a single curriculum stage. Transfers weights from prev_model if provided."""
+    """Train a single curriculum stage. Transfers weights from prev_model if provided.
+    
+    Phase 3 additions:
+    - Per-stage learning rate
+    - LR warmup for first N episodes (prevents destabilizing transferred weights)
+    - Milestone model saving at win rate thresholds
+    - Reward normalization (via environment)
+    """
     config = TRAINING_CONFIG.copy()
+    
+    # Per-stage learning rate (Phase 3)
+    stage_lr = stage.get('learning_rate', config['learning_rate'])
     
     env = create_env(stage)
     
@@ -266,11 +295,15 @@ def train_stage(stage, device, save_dir, log_file, prev_model=None):
     target_model = copy.deepcopy(model)
     target_model.eval()
     
-    optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
+    # Start with tiny LR for warmup, will ramp up
+    optimizer = optim.Adam(model.parameters(), lr=stage_lr * 0.01)
     memory = ReplayBuffer(config['memory_size'])
     
     # Epsilon schedule
     decay_episodes = int(stage['max_episodes'] * config['epsilon_decay_fraction'])
+    
+    # Phase 3: Warmup schedule
+    warmup_episodes = config['warmup_episodes']
     
     # Tracking
     best_win_rate = 0.0
@@ -279,16 +312,34 @@ def train_stage(stage, device, save_dir, log_file, prev_model=None):
     episode_start_time = time.time()
     stage_start_time = time.time()
     recent_losses = deque(maxlen=100)
+    last_milestone = 0.0  # Track milestone win rate thresholds
     
     stage_dir = os.path.join(save_dir, stage['name'])
     os.makedirs(stage_dir, exist_ok=True)
     
-    msg = f"\n{'='*70}\nStage: {stage['name']} ({stage['rows']}×{stage['cols']}, {stage['mines']} mines)\nTarget: {stage['target_win_rate']*100:.0f}% win rate | Max episodes: {stage['max_episodes']}\nDevice: {device} | Params: {sum(p.numel() for p in model.parameters()):,}\n{'='*70}\n"
+    safe_cells = stage['rows'] * stage['cols'] - stage['mines']
+    msg = (f"\n{'='*70}\n"
+           f"Stage: {stage['name']} ({stage['rows']}×{stage['cols']}, {stage['mines']} mines)\n"
+           f"Target: {stage['target_win_rate']*100:.0f}% win rate | Max episodes: {stage['max_episodes']}\n"
+           f"LR: {stage_lr} | Safe cells: {safe_cells} | Reward normalization: ON\n"
+           f"Device: {device} | Params: {sum(p.numel() for p in model.parameters()):,}\n"
+           f"{'='*70}\n")
     print(msg)
     log_file.write(msg + '\n')
     log_file.flush()
     
     for episode in range(1, stage['max_episodes'] + 1):
+        # Phase 3: LR warmup then constant
+        if episode <= warmup_episodes:
+            warmup_factor = episode / warmup_episodes
+            current_lr = stage_lr * max(0.01, warmup_factor)
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = current_lr
+        elif episode == warmup_episodes + 1:
+            # Set final LR after warmup
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = stage_lr
+        
         # Epsilon decay (linear)
         if episode <= decay_episodes:
             epsilon = config['epsilon_start'] - (config['epsilon_start'] - config['epsilon_end']) * (episode / decay_episodes)
@@ -338,11 +389,31 @@ def train_stage(stage, device, save_dir, log_file, prev_model=None):
                     'stage': stage['name'],
                 }, os.path.join(stage_dir, 'best_model.pth'))
             
+            # Phase 3: Milestone saving (every 5% win rate improvement)
+            milestone_step = config['milestone_threshold']
+            current_milestone = int(win_rate / milestone_step) * milestone_step
+            if current_milestone > last_milestone and win_rate >= milestone_step:
+                last_milestone = current_milestone
+                milestone_pct = int(current_milestone * 100)
+                torch.save({
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'episode': episode,
+                    'win_rate': win_rate,
+                    'stage': stage['name'],
+                }, os.path.join(stage_dir, f'milestone_{milestone_pct}pct.pth'))
+                mile_msg = f"  💾 Milestone saved: {milestone_pct}% win rate"
+                print(mile_msg)
+                log_file.write(mile_msg + '\n')
+                log_file.flush()
+            
             stage_elapsed = time.time() - stage_start_time
             
+            # Show current LR in log for debugging
+            current_lr = optimizer.param_groups[0]['lr']
             msg = (f"[{stage['name']}] Ep {episode:>6}/{stage['max_episodes']} | "
                    f"Win: {win_rate:.1%} (best: {best_win_rate:.1%} @{best_episode}) | "
-                   f"Loss: {avg_loss:.5f} | Eps: {epsilon:.3f} | "
+                   f"Loss: {avg_loss:.5f} | Eps: {epsilon:.3f} | LR: {current_lr:.1e} | "
                    f"Steps: {total_steps:>8} | {eps_per_sec:.1f} eps/s | "
                    f"Elapsed: {timedelta(seconds=int(stage_elapsed))}")
             print(msg)

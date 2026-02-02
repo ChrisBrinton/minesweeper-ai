@@ -35,6 +35,8 @@ class MinesweeperEnvironment:
         
         # v2 flag: use new state repr and reveal-only actions
         self.use_v2 = kwargs.get('use_v2', False)
+        # Normalize rewards by board complexity (Phase 3)
+        self.normalize_rewards = kwargs.get('normalize_rewards', False)
         
         if self.use_v2:
             # Sparse reward configuration
@@ -269,7 +271,12 @@ class MinesweeperEnvironment:
         return row * self.cols + col
     
     def _calculate_reward_v2(self, result: Dict[str, Any], cells_newly_revealed: int) -> float:
-        """Calculate sparse reward for v2 mode"""
+        """Calculate sparse reward for v2 mode.
+        
+        When normalize_rewards is True, the per-cell reveal reward is scaled
+        by 1/safe_cells so total possible positive reward is ~1.0 regardless
+        of board size. This prevents Q-value explosion on larger boards.
+        """
         if not result['success']:
             return self.reward_config['invalid_action']
         
@@ -280,7 +287,12 @@ class MinesweeperEnvironment:
         elif game_state == 'lost':
             return self.reward_config['lose']
         elif cells_newly_revealed > 0:
-            return self.reward_config['reveal_safe']
+            if self.normalize_rewards:
+                # Normalize: total possible reveal reward ≈ 1.0 for any board size
+                safe_cells = self.rows * self.cols - self.mines
+                return cells_newly_revealed / max(safe_cells, 1)
+            else:
+                return self.reward_config['reveal_safe']
         else:
             # Tried to reveal already-revealed cell
             return self.reward_config['invalid_action']
