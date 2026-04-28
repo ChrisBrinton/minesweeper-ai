@@ -114,7 +114,7 @@ CURRICULUM_STAGES = [
     {
         'name': 'intermediate',
         'rows': 16, 'cols': 16, 'mines': 40,
-        'target_win_rate': 0.20,
+        'target_win_rate': 0.25,
         'max_episodes': 300000,
         'eval_every': 2000,
         'eval_episodes': 300,
@@ -122,14 +122,27 @@ CURRICULUM_STAGES = [
         'learning_rate': 3e-5,
     },
     {
+        'name': 'advanced',
+        'rows': 16, 'cols': 20, 'mines': 60,
+        'target_win_rate': 0.15,
+        'max_episodes': 400000,
+        'eval_every': 3000,
+        'eval_episodes': 400,
+        'patience': 60000,
+        'learning_rate': 2e-5,
+    },
+    {
         'name': 'expert',
         'rows': 16, 'cols': 30, 'mines': 99,
         'target_win_rate': 0.10,
-        'max_episodes': 500000,
+        'max_episodes': 600000,
         'eval_every': 5000,
         'eval_episodes': 500,
-        'patience': 80000,
-        'learning_rate': 1e-5,
+        'patience': 100000,
+        'learning_rate': 3e-5,
+        'epsilon_start': 1.0,
+        'epsilon_end': 0.10,
+        'epsilon_decay_fraction': 0.5,
     },
 ]
 
@@ -144,7 +157,7 @@ TRAINING_CONFIG = {
     'update_freq': 4,
     'memory_size': 200000,
     'min_memory_size': 1000,
-    'max_steps_per_episode': 500,
+    'max_steps_per_episode': 800,
     # Phase 3: Stability controls
     'reward_clip': (-1.0, 1.0),       # Clip rewards to this range
     'target_q_clip': (-10.0, 10.0),   # Clip target Q-values

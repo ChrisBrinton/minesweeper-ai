@@ -263,9 +263,12 @@ profiles/
 
 # AI Training Models and Outputs
 models/
+models_v*/
 *.pth
 *.pt
 *.onnx
+*.npz
+*.log.bak*
 
 # Training Logs and Metrics
 training_plots.png
