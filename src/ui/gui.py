@@ -13,6 +13,9 @@ from game import GameBoard, GameState, CellState
 from .leaderboard import LeaderboardManager, show_leaderboard, congratulate_new_record
 
 
+_PROFILE_UI = os.environ.get('MINESWEEPER_PROFILE_UI') == '1'
+
+
 class DigitalDisplay(tk.Frame):
     """Digital display widget for mine counter and timer using 7-segment display images"""
     
@@ -202,204 +205,143 @@ class SmileyButton(tk.Button):
             self.config(text=self.FACES.get(self.current_state, '😊'), image='')
 
 
-class CellButton(tk.Frame):
-    """Individual cell button on the minesweeper grid"""
-    # Colors for different numbers
-    NUMBER_COLORS = {
-        1: 'blue',
-        2: 'green', 
-        3: 'red',
-        4: 'purple',
-        5: 'maroon',
-        6: 'turquoise',
-        7: 'black',
-        8: 'gray'
-    }
-    
-    # Class variable to store loaded images
+class BoardCanvas(tk.Canvas):
+    """Single-canvas renderer for the entire minesweeper grid.
+
+    All cells are drawn as image items on one Canvas widget — no per-cell
+    OS windows. Updates use dirty tracking so only cells whose visual state
+    changed are repainted.
+    """
+
+    CELL_SIZE = 16  # PNG cell sprites are 16x16
+
     _images: Dict[str, PhotoImage] = {}
-    
+
     @classmethod
     def load_images(cls):
-        """Load image files for cells if not already loaded"""
-        if cls._images:  # Images already loaded
+        """Load cell sprites once. Must be called after a Tk root exists."""
+        if cls._images:
             return
-            
-        # Define the base assets directory
-        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets')
-        print(f"Loading images from: {assets_dir}")
-            # Define image filenames to look for
+
+        assets_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            'assets',
+        )
+
         image_files = {
             'hidden': 'hidden_cell.png',
             'empty': 'empty_cell.png',
             'mine': 'mine_cell.png',
             'flag': 'flag_cell.png',
-            'mine_red': 'mine_red_cell.png',  # For clicked mine
-            'bad_flag': 'bad_flag_cell.png',  # For incorrectly flagged cells when game is lost
+            'mine_red': 'mine_red_cell.png',
+            'bad_flag': 'bad_flag_cell.png',
         }
-        
-        # Add numbered cells
         for i in range(1, 9):
             image_files[f'num_{i}'] = f'{i}_cell.png'
-          
-        # Try to load each image
-        loaded_count = 0
+
+        loaded = 0
         for key, filename in image_files.items():
-            try:
-                image_path = os.path.join(assets_dir, filename)
-                if os.path.exists(image_path):
-                    cls._images[key] = PhotoImage(file=image_path)
-                    print(f"Successfully loaded image: {filename}")
-                    loaded_count += 1
-                else:
-                    print(f"Image file not found: {image_path}")
-                    cls._images[key] = None  # Mark as unavailable
-            except Exception as e:
-                print(f"Error loading image {filename}: {e}")
+            path = os.path.join(assets_dir, filename)
+            if os.path.exists(path):
+                try:
+                    cls._images[key] = PhotoImage(file=path)
+                    loaded += 1
+                except Exception as e:
+                    print(f"Error loading {filename}: {e}")
+                    cls._images[key] = None
+            else:
+                print(f"Image file not found: {path}")
                 cls._images[key] = None
-                
-        print(f"Successfully loaded {loaded_count} of {len(image_files)} images")
-    
-    def __init__(self, parent, row: int, col: int, click_callback: Callable, 
-                right_click_callback: Callable):
+
+        print(f"Loaded {loaded}/{len(image_files)} cell images from {assets_dir}")
+
+    def __init__(self, parent, rows: int, cols: int,
+                 click_callback: Callable, right_click_callback: Callable):
         super().__init__(
             parent,
-            width=16,  # Standard size for minesweeper cells
-            height=16,  # Standard size for minesweeper cells
-            relief='raised',
-            bd=1,  # Thin border between cells
-            bg='#c0c0c0'  # Standard Windows gray
-        )
-        
-        # Make frame non-expandable to maintain exact size
-        self.pack_propagate(False)
-        self.grid_propagate(False)
-        
-        # Load images if not already loaded
-        self.load_images()
-        
-        # Create label for content (image or text)
-        self.label = tk.Label(
-            self,
-            bg='#c0c0c0',
-            bd=0,
+            width=cols * self.CELL_SIZE,
+            height=rows * self.CELL_SIZE,
             highlightthickness=0,
-            padx=0, 
-            pady=0
+            bd=0,
+            bg='#c0c0c0',
         )
-        self.label.pack(fill=tk.BOTH, expand=True)
-        
-        self.row = row
-        self.col = col
+        self.rows = rows
+        self.cols = cols
         self.click_callback = click_callback
         self.right_click_callback = right_click_callback
-        
-        # Initialize with hidden cell appearance
-        if self._images.get('hidden'):
-            self.label.config(image=self._images['hidden'], text='', bg='#c0c0c0')
-        else:
-            # Fallback to default appearance if image not available
-            self.label.config(text='', bg='#c0c0c0')
-        
-        # Bind click events
-        for widget in [self, self.label]:
-            widget.bind('<Button-1>', self._on_left_click)
-            widget.bind('<Button-3>', self._on_right_click)
-    
+
+        self.load_images()
+
+        # One image item per cell + last-drawn key for dirty tracking
+        hidden_img = self._images.get('hidden')
+        self._items: List[List[int]] = [[0] * cols for _ in range(rows)]
+        self._keys: List[List[Optional[str]]] = [[None] * cols for _ in range(rows)]
+        for r in range(rows):
+            for c in range(cols):
+                x = c * self.CELL_SIZE
+                y = r * self.CELL_SIZE
+                self._items[r][c] = self.create_image(
+                    x, y, image=hidden_img, anchor='nw'
+                )
+                self._keys[r][c] = 'hidden'
+
+        self.bind('<Button-1>', self._on_left_click)
+        self.bind('<Button-3>', self._on_right_click)
+
+    def _xy_to_rc(self, x: int, y: int):
+        c = x // self.CELL_SIZE
+        r = y // self.CELL_SIZE
+        if 0 <= r < self.rows and 0 <= c < self.cols:
+            return int(r), int(c)
+        return None, None
+
     def _on_left_click(self, event):
-        """Handle left mouse click"""
-        self.click_callback(self.row, self.col)
-        return "break"
-    
+        r, c = self._xy_to_rc(event.x, event.y)
+        if r is not None:
+            self.click_callback(r, c)
+
     def _on_right_click(self, event):
-        """Handle right mouse click"""
-        self.right_click_callback(self.row, self.col)
-        return "break"
-    
-    def _on_release(self, event):
-        """Handle mouse button release"""
-        # Relief will be updated by update_display method
-        pass
-    
-    def update_display(self, cell, game_board=None):
-        """Update button display based on cell state"""
+        r, c = self._xy_to_rc(event.x, event.y)
+        if r is not None:
+            self.right_click_callback(r, c)
+
+    @staticmethod
+    def _key_for_cell(cell, game_board) -> str:
+        """Compute a sprite-key for a cell. Same key = no redraw needed."""
         if cell.state == CellState.REVEALED:
-            # Configure frame for revealed state
-            self.config(relief='sunken', bd=1)
-            
             if cell.is_mine:
-                # Check if this is the clicked mine (should be red) or just a regular mine
-                is_clicked_mine = (game_board and 
-                                 game_board.clicked_mine_pos and 
-                                 game_board.clicked_mine_pos == (self.row, self.col))
-                
-                if is_clicked_mine:
-                    # Use red mine image for the clicked mine
-                    if self._images.get('mine_red'):
-                        self.label.config(image=self._images['mine_red'], text='')
-                    else:
-                        self.label.config(text='💣', image='')
-                    self.config(bg='red')
-                    self.label.config(bg='red')
-                else:
-                    # Use regular mine image for other mines
-                    if self._images.get('mine'):
-                        self.label.config(image=self._images['mine'], text='')
-                    else:
-                        self.label.config(text='💣', image='')
-                    self.config(bg='#c0c0c0')
-                    self.label.config(bg='#c0c0c0')
-            elif cell.adjacent_mines > 0:
-                # Use numbered cell image if available, otherwise fallback to text
-                img_key = f'num_{cell.adjacent_mines}'
-                if self._images.get(img_key):
-                    self.label.config(image=self._images[img_key], text='')
-                else:
-                    self.label.config(
-                        text=str(cell.adjacent_mines),
-                        fg=self.NUMBER_COLORS.get(cell.adjacent_mines, 'black'),
-                        image=''
-                    )
-                self.config(bg='#c0c0c0')
-                self.label.config(bg='#c0c0c0')
-            else:
-                # Use empty cell image if available, otherwise just clear the text
-                if self._images.get('empty'):
-                    self.label.config(image=self._images['empty'], text='')
-                else:
-                    self.label.config(text='', image='')                
-                    self.config(bg='#c0c0c0')
-                self.label.config(bg='#c0c0c0')
-        elif cell.state == CellState.FLAGGED:
-            # Configure frame for flagged state
-            self.config(relief='raised', bd=1, bg='#c0c0c0')
-            
-            # Check if this is an incorrectly flagged cell (game lost and not a mine)
-            is_bad_flag = (game_board and 
-                          game_board.game_state == GameState.LOST and 
-                          not cell.is_mine)
-            
-            if is_bad_flag:
-                # Use bad flag image for incorrectly flagged cells when game is lost
-                if self._images.get('bad_flag'):
-                    self.label.config(image=self._images['bad_flag'], text='', bg='#c0c0c0')
-                else:
-                    self.label.config(text='❌', image='', bg='#c0c0c0')
-            else:
-                # Use regular flag image
-                if self._images.get('flag'):
-                    self.label.config(image=self._images['flag'], text='', bg='#c0c0c0')
-                else:
-                    self.label.config(text='🚩', image='', bg='#c0c0c0')
-        else:  # HIDDEN
-            # Configure frame for hidden state
-            self.config(relief='raised', bd=1, bg='#c0c0c0')
-            
-            # Use hidden cell image if available, otherwise just clear the text
-            if self._images.get('hidden'):
-                self.label.config(image=self._images['hidden'], text='', bg='#c0c0c0')
-            else:
-                self.label.config(text='', image='', bg='#c0c0c0')
+                if (game_board.clicked_mine_pos and
+                        game_board.clicked_mine_pos == (cell.row, cell.col)):
+                    return 'mine_red'
+                return 'mine'
+            if cell.adjacent_mines > 0:
+                return f'num_{cell.adjacent_mines}'
+            return 'empty'
+        if cell.state == CellState.FLAGGED:
+            if (game_board.game_state == GameState.LOST and not cell.is_mine):
+                return 'bad_flag'
+            return 'flag'
+        return 'hidden'
+
+    def redraw(self, game_board) -> int:
+        """Repaint cells whose visual state changed. Returns # cells repainted."""
+        dirty = 0
+        items = self._items
+        keys = self._keys
+        images = self._images
+        for r in range(self.rows):
+            row_cells = game_board.board[r]
+            row_keys = keys[r]
+            row_items = items[r]
+            for c in range(self.cols):
+                key = self._key_for_cell(row_cells[c], game_board)
+                if key != row_keys[c]:
+                    img = images.get(key)
+                    if img is not None:
+                        self.itemconfigure(row_items[c], image=img)
+                    row_keys[c] = key
+                    dirty += 1
+        return dirty
 
 
 class MinesweeperGUI:
@@ -409,17 +351,17 @@ class MinesweeperGUI:
         self.root = tk.Tk()
         self.root.title('Minesweeper')
         self.root.resizable(False, False)
-        
+
         # Leaderboard system
         self.leaderboard_manager = LeaderboardManager()
           # Game components
         self.game_board: Optional[GameBoard] = None
-        self.cell_buttons: List[List[CellButton]] = []
+        self.board_canvas: Optional[BoardCanvas] = None
         self.start_time: Optional[float] = None
         self.game_timer_id: Optional[str] = None
         self.current_difficulty: str = 'beginner'
         self.current_elapsed_time: int = 0  # Track current elapsed time for consistent leaderboard recording
-        
+
         # GUI components
         self.mine_display: Optional[DigitalDisplay] = None
         self.timer_display: Optional[DigitalDisplay] = None
@@ -440,7 +382,7 @@ class MinesweeperGUI:
         # OPTIMIZATION: Load all images once during startup
         DigitalDisplay.load_digit_images()
         SmileyButton.load_images()
-        CellButton.load_images()
+        BoardCanvas.load_images()
         
         # Top panel with displays and smiley
         top_frame = tk.Frame(main_frame, bg='lightgray')
@@ -514,18 +456,19 @@ class MinesweeperGUI:
         self.start_time = None
         self.current_elapsed_time = 0  # Reset elapsed time tracking
         
-        # OPTIMIZATION: Check if we can reuse existing buttons
-        current_size = (len(self.cell_buttons), len(self.cell_buttons[0])) if self.cell_buttons else (0, 0)
+        # Reuse the existing canvas if board size hasn't changed
         target_size = (rows, cols)
-        
+        current_size = (
+            (self.board_canvas.rows, self.board_canvas.cols)
+            if self.board_canvas else (0, 0)
+        )
         if current_size != target_size:
-            # Size changed - need to recreate buttons
-            self._recreate_buttons(rows, cols)
+            self._recreate_board_canvas(rows, cols)
         else:
-            # Same size - just reset existing buttons (much faster!)
-            self._reset_existing_buttons()
-        
-        # OPTIMIZATION: Single layout update at the end instead of multiple updates
+            # Same size: just repaint to hidden via dirty tracking
+            self._update_display()
+
+        # Single layout update at the end instead of multiple updates
         self.root.update_idletasks()
     
     def _restart_game(self):
@@ -580,20 +523,24 @@ class MinesweeperGUI:
     
     def _update_display(self):
         """Update all visual elements"""
-        if not self.game_board:
+        if not self.game_board or not self.board_canvas:
             return
-        
+
         # Update mine counter
         remaining_mines = self.game_board.get_remaining_mines()
         self.mine_display.set_value(remaining_mines)
-        
+
         # Update smiley face
         self.smiley_button.set_state(self.game_board.game_state)
-          # Update cell buttons
-        for row in range(self.game_board.rows):
-            for col in range(self.game_board.cols):
-                cell = self.game_board.get_cell(row, col)
-                self.cell_buttons[row][col].update_display(cell, self.game_board)
+
+        # Repaint only cells whose visual state changed
+        if _PROFILE_UI:
+            t0 = time.perf_counter()
+            dirty = self.board_canvas.redraw(self.game_board)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            print(f"[ui] redraw {dirty:>3} cell(s) in {elapsed_ms:.2f} ms")
+        else:
+            self.board_canvas.redraw(self.game_board)
     
     def _update_timer(self):
         """Update the game timer"""
@@ -691,36 +638,16 @@ Faithful recreation of the original game
         """Start the GUI main loop"""
         self.root.mainloop()
     
-    def _recreate_buttons(self, rows: int, cols: int):
-        """Create new buttons when board size changes (OPTIMIZATION: Only when needed)"""
-        # Clear existing buttons
+    def _recreate_board_canvas(self, rows: int, cols: int):
+        """Create a fresh BoardCanvas (only when board size changes)."""
         for widget in self.game_frame.winfo_children():
             widget.destroy()
-        
-        # Create new cell buttons
-        self.cell_buttons = []
-        for row in range(rows):
-            button_row = []
-            for col in range(cols):
-                button = CellButton(
-                    self.game_frame,
-                    row, col, self._on_cell_click,
-                    self._on_cell_right_click
-                )
-                button.grid(row=row, column=col, padx=0, pady=0)
-                button_row.append(button)
-            self.cell_buttons.append(button_row)
-        
-        # Initialize display for all cells
+
+        self.board_canvas = BoardCanvas(
+            self.game_frame, rows, cols,
+            self._on_cell_click, self._on_cell_right_click,
+        )
+        self.board_canvas.pack()
+
+        # Initial paint
         self._update_display()
-    
-    def _reset_existing_buttons(self):
-        """Reset existing buttons to hidden state (OPTIMIZATION: Reuse existing widgets)"""
-        # Just update display without recreating widgets - much faster!
-        self._update_display()
-    
-    def _create_buttons(self):
-        """Create initial button grid (used only during GUI setup)"""
-        # This method is kept for the initial GUI setup
-        rows, cols, mines = GameBoard.DIFFICULTIES['beginner']
-        self._recreate_buttons(rows, cols)
