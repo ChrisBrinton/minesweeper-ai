@@ -11,6 +11,7 @@ from typing import List, Callable, Optional, Dict
 
 from game import GameBoard, GameState, CellState
 from .leaderboard import LeaderboardManager, show_leaderboard, congratulate_new_record
+from .history import GameHistoryManager, GameRecord, show_stats
 
 
 _PROFILE_UI = os.environ.get('MINESWEEPER_PROFILE_UI') == '1'
@@ -354,6 +355,7 @@ class MinesweeperGUI:
 
         # Leaderboard system
         self.leaderboard_manager = LeaderboardManager()
+        self.history_manager = GameHistoryManager()
           # Game components
         self.game_board: Optional[GameBoard] = None
         self.board_canvas: Optional[BoardCanvas] = None
@@ -361,12 +363,19 @@ class MinesweeperGUI:
         self.game_timer_id: Optional[str] = None
         self.current_difficulty: str = 'beginner'
         self.current_elapsed_time: int = 0  # Track current elapsed time for consistent leaderboard recording
+        self.current_record: Optional[GameRecord] = None
+
+        # Persist any in-progress record on window close
+        self.root.protocol('WM_DELETE_WINDOW', self._on_close)
 
         # GUI components
         self.mine_display: Optional[DigitalDisplay] = None
         self.timer_display: Optional[DigitalDisplay] = None
         self.smiley_button: Optional[SmileyButton] = None
         self.game_frame: Optional[tk.Frame] = None
+        self.live_cpm_label: Optional[tk.Label] = None
+        self.live_fpm_label: Optional[tk.Label] = None
+        self.live_progress_label: Optional[tk.Label] = None
         self._setup_gui()
         
         # Start with the last played difficulty
@@ -402,7 +411,26 @@ class MinesweeperGUI:
         # Timer
         self.timer_display = DigitalDisplay(top_frame)
         self.timer_display.pack(side='right')
-        
+
+        # Live in-game rate stats (cells/min, flags/min, progress%)
+        live_frame = tk.Frame(main_frame, bg='lightgray')
+        live_frame.pack(fill='x', padx=5, pady=(0, 5))
+        self.live_cpm_label = tk.Label(
+            live_frame, text='Cells/min: —',
+            font=('Arial', 9), bg='lightgray', fg='black',
+        )
+        self.live_cpm_label.pack(side='left', padx=8)
+        self.live_progress_label = tk.Label(
+            live_frame, text='Progress: —',
+            font=('Arial', 9), bg='lightgray', fg='black',
+        )
+        self.live_progress_label.pack(side='left', expand=True)
+        self.live_fpm_label = tk.Label(
+            live_frame, text='Flags/min: —',
+            font=('Arial', 9), bg='lightgray', fg='black',
+        )
+        self.live_fpm_label.pack(side='right', padx=8)
+
         # Game board frame
         self.game_frame = tk.Frame(main_frame, bg='lightgray')
         self.game_frame.pack(padx=5, pady=5)
@@ -424,8 +452,9 @@ class MinesweeperGUI:
         game_menu.add_command(label="Expert", command=lambda: self._new_game('expert'))
         game_menu.add_separator()
         game_menu.add_command(label="Best Times...", command=self._show_leaderboard)
+        game_menu.add_command(label="Statistics...", command=self._show_stats)
         game_menu.add_separator()
-        game_menu.add_command(label="Exit", command=self.root.quit)
+        game_menu.add_command(label="Exit", command=self._on_close)
         
         # Help menu
         help_menu = Menu(menubar, tearoff=0)
@@ -439,14 +468,18 @@ class MinesweeperGUI:
         if self.game_timer_id:
             self.root.after_cancel(self.game_timer_id)
             self.game_timer_id = None
-        
+
+        # Finalize any in-progress record as abandoned
+        self._abandon_current_record()
+
         # Save current difficulty
         self.current_difficulty = difficulty
         self.leaderboard_manager.set_last_difficulty(difficulty)
-        
+
         # Create new game board
         rows, cols, mines = GameBoard.DIFFICULTIES[difficulty]
         self.game_board = GameBoard(rows, cols, mines)
+        self.current_record = GameRecord(difficulty, rows, cols, mines)
         
         # Reset displays
         self.mine_display.set_value(mines)
@@ -468,6 +501,8 @@ class MinesweeperGUI:
             # Same size: just repaint to hidden via dirty tracking
             self._update_display()
 
+        self._reset_live_stats()
+
         # Single layout update at the end instead of multiple updates
         self.root.update_idletasks()
     
@@ -484,42 +519,65 @@ class MinesweeperGUI:
         """Handle left click on a cell"""
         if not self.game_board:
             return
-        
+
+        # Ignore clicks on cells that won't change anything (already revealed/flagged
+        # before game start, or any click after game over) so we don't pollute the
+        # move log with no-ops.
+        cell = self.game_board.get_cell(row, col)
+        if (self.game_board.game_state in (GameState.WON, GameState.LOST)
+                or cell is None
+                or cell.state != CellState.HIDDEN):
+            return
+
         # Check if this is the first click
         is_first_click = self.game_board.game_state == GameState.READY
-        
+
+        if self.current_record is not None:
+            self.current_record.append_move(row, col, 'reveal')
+
         # Reveal cell
         self.game_board.reveal_cell(row, col)
-        
+
         # Start timer on first click (after game state changes to PLAYING)
         if is_first_click and self.game_board.game_state == GameState.PLAYING:
             self.start_time = time.time()
             self._update_timer()
-        
+
         # Update smiley face
         self.smiley_button.set_state(self.game_board.game_state)
-        
+
         # Update displays
         self._update_display()
-        
+        self._update_live_stats()
+
         # Handle game end
         if self.game_board.game_state in [GameState.WON, GameState.LOST]:
             self._end_game()
-    
+
     def _on_cell_right_click(self, row: int, col: int):
         """Handle right click on a cell"""
         if not self.game_board:
             return
-        
+
         # Can't flag if game hasn't started or is over
         if self.game_board.game_state in [GameState.READY, GameState.WON, GameState.LOST]:
             return
-        
+
+        cell = self.game_board.get_cell(row, col)
+        if cell is None or cell.state == CellState.REVEALED:
+            return
+
+        # Determine the action that will be taken (HIDDEN→flag, FLAGGED→unflag)
+        action = 'flag' if cell.state == CellState.HIDDEN else 'unflag'
+        if self.current_record is not None:
+            self.current_record.append_move(row, col, action)
+
         # Toggle flag
         self.game_board.toggle_flag(row, col)
-        
+
         # Update displays
         self._update_display()
+        self._update_live_stats()
     
     def _update_display(self):
         """Update all visual elements"""
@@ -544,16 +602,73 @@ class MinesweeperGUI:
     
     def _update_timer(self):
         """Update the game timer"""
-        if (self.start_time and 
-            self.game_board and 
+        if (self.start_time and
+            self.game_board and
             self.game_board.game_state == GameState.PLAYING):
-            
+
             elapsed = int(time.time() - self.start_time)
             self.current_elapsed_time = elapsed  # Store the current elapsed time
             self.timer_display.set_value(min(elapsed, 999))  # Cap at 999
-            
+            self._update_live_stats()
+
             # Schedule next update
             self.game_timer_id = self.root.after(1000, self._update_timer)
+
+    def _reset_live_stats(self):
+        """Reset live-stats labels to placeholder for a fresh game."""
+        if self.live_cpm_label is not None:
+            self.live_cpm_label.config(
+                text='Cells/min: —', fg='black', font=('Arial', 9))
+        if self.live_fpm_label is not None:
+            self.live_fpm_label.config(
+                text='Flags/min: —', fg='black', font=('Arial', 9))
+        if self.live_progress_label is not None:
+            self.live_progress_label.config(
+                text='Progress: —', fg='black', font=('Arial', 9))
+
+    def _update_live_stats(self):
+        """Refresh the live cells/min, flags/min, and progress% labels.
+
+        Cells/min and flags/min are highlighted (bold + dark green) when the
+        current rate exceeds the historical best for this difficulty.
+        """
+        if self.live_cpm_label is None or not self.game_board:
+            return
+
+        # Progress % is meaningful any time after first reveal
+        total_safe = self.game_board.rows * self.game_board.cols - self.game_board.total_mines
+        if total_safe > 0:
+            cells_for_progress = self.game_board.cells_revealed
+            if self.game_board.game_state == GameState.LOST and cells_for_progress > 0:
+                cells_for_progress -= 1
+            pct = 100.0 * cells_for_progress / total_safe
+            self.live_progress_label.config(text=f'Progress: {pct:.0f}%')
+
+        # Rates only make sense once the timer has started
+        elapsed = self.current_elapsed_time
+        if elapsed <= 0 or self.game_board.game_state != GameState.PLAYING:
+            return
+        minutes = elapsed / 60.0
+
+        cells_revealed = self.game_board.cells_revealed
+        cpm = cells_revealed / minutes
+        fpm = self._count_correct_player_flags() / minutes
+
+        best = self.history_manager.best_rates_for(self.current_difficulty)
+        cpm_record = best['cells_per_minute'] > 0 and cpm > best['cells_per_minute']
+        fpm_record = best['flags_per_minute'] > 0 and fpm > best['flags_per_minute']
+
+        record_color = '#0a7d0a'  # dark green
+        self.live_cpm_label.config(
+            text=f'Cells/min: {cpm:.0f}',
+            fg=record_color if cpm_record else 'black',
+            font=('Arial', 9, 'bold') if cpm_record else ('Arial', 9),
+        )
+        self.live_fpm_label.config(
+            text=f'Flags/min: {fpm:.1f}',
+            fg=record_color if fpm_record else 'black',
+            font=('Arial', 9, 'bold') if fpm_record else ('Arial', 9),
+        )
     
     def _end_game(self):
         """Handle game end"""
@@ -561,10 +676,15 @@ class MinesweeperGUI:
         if self.game_timer_id:
             self.root.after_cancel(self.game_timer_id)
             self.game_timer_id = None
-        
+
+        # Finalize and persist the game record
+        self._finalize_record(
+            'won' if self.game_board.game_state == GameState.WON else 'lost'
+        )
+
         # Check for new leaderboard entry if player won
-        if (self.game_board and 
-            self.game_board.game_state == GameState.WON and 
+        if (self.game_board and
+            self.game_board.game_state == GameState.WON and
             self.start_time):
             
             # Use the current elapsed time that was displayed on the timer
@@ -596,6 +716,76 @@ class MinesweeperGUI:
                         self.root, self.leaderboard_manager, self.current_difficulty
                     ))
     
+    def _collect_mine_positions(self) -> List[tuple]:
+        """Return list of (row, col) for all mines on the current board.
+        Empty list if mines haven't been placed yet (game never started)."""
+        if not self.game_board or not self.game_board.mines_placed:
+            return []
+        positions = []
+        for r in range(self.game_board.rows):
+            for c in range(self.game_board.cols):
+                if self.game_board.board[r][c].is_mine:
+                    positions.append((r, c))
+        return positions
+
+    def _count_correct_player_flags(self) -> int:
+        """Count cells the player has flagged (per move log) that are mines.
+
+        Uses the in-progress record's move log so we don't count the win-time
+        auto-flagging that GameBoard does when the player wins.
+        """
+        if self.current_record is None or not self.game_board:
+            return 0
+        flagged = set()
+        for m in self.current_record.moves:
+            if m['a'] == 'flag':
+                flagged.add((m['r'], m['c']))
+            elif m['a'] == 'unflag':
+                flagged.discard((m['r'], m['c']))
+        if not flagged:
+            return 0
+        return sum(
+            1 for (r, c) in flagged
+            if 0 <= r < self.game_board.rows and 0 <= c < self.game_board.cols
+            and self.game_board.board[r][c].is_mine
+        )
+
+    def _finalize_record(self, result: str):
+        """Finalize the in-progress record with a terminal result and persist it."""
+        if self.current_record is None:
+            return
+        cells_revealed = self.game_board.cells_revealed if self.game_board else 0
+        if result == 'lost' and cells_revealed > 0:
+            cells_revealed -= 1  # don't count the clicked mine
+        self.current_record.finalize(
+            result=result,
+            elapsed_seconds=self.current_elapsed_time,
+            mine_positions=self._collect_mine_positions(),
+            cells_revealed=cells_revealed,
+            correct_flags=self._count_correct_player_flags(),
+        )
+        self.history_manager.append(self.current_record)
+        self.current_record = None
+
+    def _abandon_current_record(self):
+        """If a game is in progress (any moves made), record it as abandoned."""
+        if self.current_record is None:
+            return
+        if not self.current_record.moves:
+            # Never started — don't pollute history
+            self.current_record = None
+            return
+        self._finalize_record('abandoned')
+
+    def _show_stats(self):
+        """Show the statistics dialog."""
+        show_stats(self.root, self.history_manager, self.current_difficulty)
+
+    def _on_close(self):
+        """Called when the user closes the window (X button or Game→Exit)."""
+        self._abandon_current_record()
+        self.root.destroy()
+
     def _show_help(self):
         """Show help dialog"""
         help_text = """How to Play Minesweeper:
