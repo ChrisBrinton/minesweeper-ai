@@ -34,6 +34,7 @@ class GameRecord:
         'id', 'started_at', 'ended_at', 'difficulty', 'rows', 'cols',
         'mines', 'result', 'elapsed_seconds', 'first_click',
         'mine_positions', 'moves', 'cells_revealed', 'correct_flags',
+        'ai_used',
     )
 
     def __init__(self, difficulty: str, rows: int, cols: int, mines: int):
@@ -51,6 +52,9 @@ class GameRecord:
         self.moves: List[Dict] = []
         self.cells_revealed: int = 0
         self.correct_flags: int = 0
+        # True if Suggest or Auto-play was used during this game. Tainted
+        # games are still recorded but excluded from personal stats.
+        self.ai_used: bool = False
 
     def append_move(self, row: int, col: int, action: str):
         """Append a click. action ∈ {'reveal', 'flag', 'unflag'}."""
@@ -84,6 +88,7 @@ class GameRecord:
             'moves': self.moves,
             'cells_revealed': self.cells_revealed,
             'correct_flags': self.correct_flags,
+            'ai_used': self.ai_used,
         }
 
 
@@ -195,8 +200,14 @@ class GameHistoryManager:
         return list(self._records)
 
     def stats_for(self, difficulty: str) -> Dict:
-        """Aggregate stats for one difficulty."""
-        games = [r for r in self._records if r.get('difficulty') == difficulty]
+        """Aggregate stats for one difficulty.
+
+        AI-assisted games (records with ai_used=True) are excluded — they
+        don't count toward personal records.
+        """
+        games = [r for r in self._records
+                 if r.get('difficulty') == difficulty
+                 and not r.get('ai_used', False)]
         played = len(games)
         won = sum(1 for r in games if r.get('result') == 'won')
         lost = sum(1 for r in games if r.get('result') == 'lost')
@@ -264,8 +275,10 @@ class GameHistoryManager:
         }
 
     def overall_stats(self) -> Dict:
-        played = len(self._records)
-        total_seconds = sum(r.get('elapsed_seconds', 0) for r in self._records)
+        """Aggregate across all difficulties. Excludes AI-assisted games."""
+        clean = [r for r in self._records if not r.get('ai_used', False)]
+        played = len(clean)
+        total_seconds = sum(r.get('elapsed_seconds', 0) for r in clean)
         return {
             'played': played,
             'total_seconds': total_seconds,

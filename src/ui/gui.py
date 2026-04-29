@@ -292,6 +292,26 @@ class BoardCanvas(tk.Canvas):
         self.bind('<Button-1>', self._on_left_click)
         self.bind('<Button-3>', self._on_right_click)
 
+        # Highlight overlay for the AI Suggest button — drawn on top of cell
+        # sprites, hidden by default. tag_raise keeps it above all images.
+        self._highlight_id = self.create_rectangle(
+            0, 0, self.CELL_SIZE, self.CELL_SIZE,
+            outline='#ffd700', width=2, state='hidden',
+        )
+
+    def highlight_cell(self, row: int, col: int):
+        """Draw the AI suggestion outline at (row, col)."""
+        x0 = col * self.CELL_SIZE + 1
+        y0 = row * self.CELL_SIZE + 1
+        x1 = (col + 1) * self.CELL_SIZE - 1
+        y1 = (row + 1) * self.CELL_SIZE - 1
+        self.coords(self._highlight_id, x0, y0, x1, y1)
+        self.itemconfigure(self._highlight_id, state='normal')
+        self.tag_raise(self._highlight_id)
+
+    def clear_highlight(self):
+        self.itemconfigure(self._highlight_id, state='hidden')
+
     def _xy_to_rc(self, x: int, y: int):
         c = x // self.CELL_SIZE
         r = y // self.CELL_SIZE
@@ -383,12 +403,25 @@ class MinesweeperGUI:
         self.live_cpm_label: Optional[tk.Label] = None
         self.live_fpm_label: Optional[tk.Label] = None
         self.live_progress_label: Optional[tk.Label] = None
+        self.suggest_button: Optional[tk.Button] = None
+        self.autoplay_button: Optional[tk.Button] = None
+        # Lazy MinesweeperInference; constructed on first Suggest click
+        self._inference = None
+        # Auto-play loop state — Tk after-id of the next pending step (or None)
+        self._autoplay_after_id: Optional[str] = None
+        # Per-step timing: highlight visible, then move executes
+        self._autoplay_show_ms = 100
+        self._autoplay_pause_ms = 150
         self._setup_gui()
         
         # Start with the last played difficulty
         last_difficulty = self.leaderboard_manager.get_last_difficulty()
         self._new_game(last_difficulty)
-    
+
+        # Preload the model in the background so the first Suggest /
+        # Auto-play click doesn't pay the ~500ms CUDA warmup cost.
+        self._maybe_preload_model()
+
     def _setup_gui(self):
         """Setup the main GUI components"""
         # Main container
@@ -419,7 +452,10 @@ class MinesweeperGUI:
         self.timer_display = DigitalDisplay(top_frame)
         self.timer_display.pack(side='right')
 
-        # Live in-game rate stats (cells/min, flags/min, progress%)
+        # Live in-game rate stats (cells/min, flags/min, progress%) +
+        # Suggest button. Pack order on the right side matters: the
+        # FIRST .pack(side='right', ...) ends up rightmost, so suggest
+        # is packed first to keep it at the far right edge.
         live_frame = tk.Frame(main_frame, bg='lightgray')
         live_frame.pack(fill='x', padx=5, pady=(0, 5))
         self.live_cpm_label = tk.Label(
@@ -432,11 +468,41 @@ class MinesweeperGUI:
             font=('Arial', 9), bg='lightgray', fg='black',
         )
         self.live_progress_label.pack(side='left', expand=True)
+        # AI action buttons: vertical stack on the right
+        # (Auto-play above Suggest, both disabled outside PLAYING state).
+        # Auto-play is a toggle Checkbutton with indicatoron=False — Tk's
+        # canonical toggle-button pattern. It looks raised when off and
+        # sunken with selectcolor fill when on.
+        # The whole stack is shown/hidden based on the AI-enabled setting.
+        self._ai_button_stack = tk.Frame(live_frame, bg='lightgray')
+        self.autoplay_var = tk.IntVar(value=0)
+        self.autoplay_button = tk.Checkbutton(
+            self._ai_button_stack, text='Auto-play',
+            font=('Arial', 9), state='disabled',
+            variable=self.autoplay_var,
+            indicatoron=False,
+            selectcolor='#fff3a8',  # pale yellow when toggled on
+            width=14,
+            command=self._on_autoplay_toggle,
+        )
+        self.autoplay_button.pack(fill='x')
+        self.suggest_button = tk.Button(
+            self._ai_button_stack, text='Suggest move',
+            font=('Arial', 9), state='disabled',
+            command=self._on_suggest_click,
+        )
+        self.suggest_button.pack(fill='x')
+        # live_fpm_label always exists; pack order on the right side is
+        # managed by _show_ai_buttons / _hide_ai_buttons so the stack
+        # ends up rightmost when shown.
         self.live_fpm_label = tk.Label(
             live_frame, text='Flags/min: —',
             font=('Arial', 9), bg='lightgray', fg='black',
         )
-        self.live_fpm_label.pack(side='right', padx=8)
+        if self.settings_manager.ai_enabled:
+            self._show_ai_buttons()
+        else:
+            self.live_fpm_label.pack(side='right', padx=8)
 
         # Game board frame
         self.game_frame = tk.Frame(main_frame, bg='lightgray')
@@ -476,6 +542,8 @@ class MinesweeperGUI:
         if self.game_timer_id:
             self.root.after_cancel(self.game_timer_id)
             self.game_timer_id = None
+        # Stop any in-flight auto-play loop and flip the toggle off
+        self._stop_autoplay()
 
         # Finalize any in-progress record as abandoned
         self._abandon_current_record()
@@ -508,8 +576,12 @@ class MinesweeperGUI:
         else:
             # Same size: just repaint to hidden via dirty tracking
             self._update_display()
+            # And clear any stale AI suggestion overlay
+            if self.board_canvas is not None:
+                self.board_canvas.clear_highlight()
 
         self._reset_live_stats()
+        self._update_action_buttons()
 
         # Single layout update at the end instead of multiple updates
         self.root.update_idletasks()
@@ -537,6 +609,10 @@ class MinesweeperGUI:
                 or cell.state != CellState.HIDDEN):
             return
 
+        # Any click clears a stale AI suggestion highlight
+        if self.board_canvas is not None:
+            self.board_canvas.clear_highlight()
+
         # Check if this is the first click
         is_first_click = self.game_board.game_state == GameState.READY
 
@@ -557,6 +633,7 @@ class MinesweeperGUI:
         # Update displays
         self._update_display()
         self._update_live_stats()
+        self._update_action_buttons()
 
         # Handle game end
         if self.game_board.game_state in [GameState.WON, GameState.LOST]:
@@ -574,6 +651,10 @@ class MinesweeperGUI:
         cell = self.game_board.get_cell(row, col)
         if cell is None or cell.state == CellState.REVEALED:
             return
+
+        # Any click clears a stale AI suggestion highlight
+        if self.board_canvas is not None:
+            self.board_canvas.clear_highlight()
 
         # Determine the action that will be taken (HIDDEN→flag, FLAGGED→unflag)
         action = 'flag' if cell.state == CellState.HIDDEN else 'unflag'
@@ -638,7 +719,9 @@ class MinesweeperGUI:
         """Refresh the live cells/min, flags/min, and progress% labels.
 
         Cells/min and flags/min are highlighted (bold + dark green) when the
-        current rate exceeds the historical best for this difficulty.
+        current rate exceeds the historical best for this difficulty. If
+        AI assistance was used in this game, the rate values are blanked
+        out (and progress is still shown — it's board state, not skill).
         """
         if self.live_cpm_label is None or not self.game_board:
             return
@@ -651,6 +734,15 @@ class MinesweeperGUI:
                 cells_for_progress -= 1
             pct = 100.0 * cells_for_progress / total_safe
             self.live_progress_label.config(text=f'Progress: {pct:.0f}%')
+
+        ai_used = bool(self.current_record and self.current_record.ai_used)
+        if ai_used:
+            # Rates are meaningless once AI is helping — show neutral values
+            self.live_cpm_label.config(
+                text='Cells/min: — (AI)', fg='#888', font=('Arial', 9))
+            self.live_fpm_label.config(
+                text='Flags/min: — (AI)', fg='#888', font=('Arial', 9))
+            return
 
         # Rates only make sense once the timer has started
         elapsed = self.current_elapsed_time
@@ -685,15 +777,20 @@ class MinesweeperGUI:
             self.root.after_cancel(self.game_timer_id)
             self.game_timer_id = None
 
+        # Capture the AI-tainted flag before _finalize_record nulls out
+        # current_record — we need it for the leaderboard check below
+        ai_used = bool(self.current_record and self.current_record.ai_used)
+
         # Finalize and persist the game record
         self._finalize_record(
             'won' if self.game_board.game_state == GameState.WON else 'lost'
         )
 
-        # Check for new leaderboard entry if player won
+        # Check for new leaderboard entry if player won (and didn't use AI)
         if (self.game_board and
             self.game_board.game_state == GameState.WON and
-            self.start_time):
+            self.start_time and
+            not ai_used):
             
             # Use the current elapsed time that was displayed on the timer
             # instead of recalculating to avoid timing discrepancies
@@ -800,7 +897,237 @@ class MinesweeperGUI:
 
     def _show_settings(self):
         """Show the Settings dialog."""
-        show_settings(self.root, self.settings_manager)
+        def _on_settings_changed():
+            # Drop any cached inference so a changed model_path takes effect
+            # on the next click / preload.
+            self._inference = None
+            if self.settings_manager.ai_enabled:
+                self._show_ai_buttons()
+                self._maybe_preload_model()
+            else:
+                # Tear everything down — no buttons, no model in memory
+                self._stop_autoplay()
+                self._hide_ai_buttons()
+        show_settings(self.root, self.settings_manager,
+                      on_changed=_on_settings_changed)
+
+    def _show_ai_buttons(self):
+        """Pack the AI button stack rightmost on the live-stats row.
+
+        Re-packs live_fpm_label too so the visual order stays
+        |cells | progress(expand) | flags/min | [Auto-play / Suggest stack]|
+        regardless of any prior pack_forget calls.
+        """
+        self.live_fpm_label.pack_forget()
+        self._ai_button_stack.pack(side='right', padx=8)
+        self.live_fpm_label.pack(side='right', padx=8)
+        # Sync enabled state with current game state
+        self._update_action_buttons()
+
+    def _hide_ai_buttons(self):
+        """Remove the AI button stack from the live-stats row."""
+        self._ai_button_stack.pack_forget()
+
+    def _maybe_preload_model(self):
+        """If AI is enabled, kick off model load on a daemon thread so the
+        first Suggest/Auto-play click is fast. No-op if already loaded or
+        disabled. Errors are logged; user gets a nice message when they
+        actually click."""
+        if not self.settings_manager.ai_enabled:
+            return
+        inf = self._ensure_inference()
+        if inf is None or inf.is_loaded():
+            return
+
+        def _load():
+            try:
+                inf.load()
+                print('[ai] model preloaded')
+            except FileNotFoundError as e:
+                print(f'[ai] preload skipped: {e}')
+            except Exception as e:
+                print(f'[ai] preload failed: {e}')
+
+        threading.Thread(target=_load, daemon=True,
+                         name='minesweeper-ai-preload').start()
+
+    def _update_action_buttons(self):
+        """Enable Suggest and Auto-play only while a game is in progress.
+
+        If autoplay was running and the game just ended, also flip the
+        toggle off so the button doesn't sit visually 'on' while disabled.
+        """
+        if not self.game_board:
+            return
+        state = ('normal' if self.game_board.game_state == GameState.PLAYING
+                 else 'disabled')
+        if self.suggest_button is not None:
+            self.suggest_button.config(state=state)
+        if self.autoplay_button is not None:
+            self.autoplay_button.config(state=state)
+            if state == 'disabled' and self.autoplay_var.get():
+                self.autoplay_var.set(0)
+                self._cancel_autoplay()
+
+    def _mark_ai_used(self):
+        """Flag the current game as AI-assisted. Idempotent."""
+        if self.current_record is not None and not self.current_record.ai_used:
+            self.current_record.ai_used = True
+            # Refresh live stats so the rate values blank out immediately
+            self._update_live_stats()
+
+    def _ensure_inference(self):
+        """Lazy-construct (and return) the MinesweeperInference instance.
+
+        Returns the instance, or None if the inference module itself can't
+        be imported. Does NOT load the model — callers do that and handle
+        FileNotFoundError so they can show appropriate UI.
+        """
+        if self._inference is not None:
+            return self._inference
+        try:
+            # Lazy import — avoids torch at GUI startup
+            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))))
+            if repo_root not in sys.path:
+                sys.path.insert(0, repo_root)
+            from src.ai.inference import MinesweeperInference
+        except ImportError as e:
+            messagebox.showerror(
+                'AI inference', f'Failed to load inference module:\n{e}')
+            return None
+        self._inference = MinesweeperInference(self.settings_manager.model_path)
+        return self._inference
+
+    def _on_suggest_click(self):
+        """Run inference and highlight the suggested cell."""
+        if not self.game_board or self.game_board.game_state != GameState.PLAYING:
+            return
+
+        inf = self._ensure_inference()
+        if inf is None:
+            return
+
+        # Mark this game AI-tainted before we even fetch the suggestion —
+        # using the button is the act that disqualifies stats, regardless
+        # of whether the user accepts the highlighted cell.
+        self._mark_ai_used()
+
+        # Show busy cursor while loading + running
+        self.root.config(cursor='watch')
+        self.suggest_button.config(state='disabled')
+        self.root.update_idletasks()
+        try:
+            try:
+                suggestion = inf.suggest_move(self.game_board)
+            except FileNotFoundError as e:
+                messagebox.showerror(
+                    'AI model not found',
+                    f'{e}\n\nSet the model path in Game → Settings.')
+                self._inference = None
+                return
+            except Exception as e:
+                messagebox.showerror('AI suggestion failed', str(e))
+                return
+        finally:
+            self.root.config(cursor='')
+            self._update_action_buttons()
+
+        if suggestion is None:
+            return
+        self.board_canvas.highlight_cell(suggestion['row'], suggestion['col'])
+
+    def _on_autoplay_toggle(self):
+        """User clicked Auto-play. Tk has already toggled autoplay_var, so
+        the new state tells us whether we're starting or stopping."""
+        if self.autoplay_var.get():
+            if not self._start_autoplay():
+                # Failed to start — roll the toggle back so the visual
+                # matches reality
+                self.autoplay_var.set(0)
+        else:
+            self._stop_autoplay()
+
+    def _start_autoplay(self) -> bool:
+        """Begin the auto-play loop. Returns True iff we actually started."""
+        if not self.game_board or self.game_board.game_state != GameState.PLAYING:
+            return False
+
+        inf = self._ensure_inference()
+        if inf is None:
+            return False
+
+        # Same as Suggest: turning autoplay on disqualifies this game's stats
+        self._mark_ai_used()
+        # First-time model load can take ~500ms (CUDA warmup); do it
+        # eagerly with a busy cursor so the user isn't staring at nothing.
+        if not inf.is_loaded():
+            self.root.config(cursor='watch')
+            self.root.update_idletasks()
+            try:
+                inf.load()
+            except FileNotFoundError as e:
+                messagebox.showerror(
+                    'AI model not found',
+                    f'{e}\n\nSet the model path in Game → Settings.')
+                self._inference = None
+                return False
+            except Exception as e:
+                messagebox.showerror('AI model load failed', str(e))
+                return False
+            finally:
+                self.root.config(cursor='')
+
+        self._autoplay_step()
+        return True
+
+    def _stop_autoplay(self):
+        """Stop the auto-play loop. Untoggles the button visual."""
+        self._cancel_autoplay()
+        if self.autoplay_var.get():
+            self.autoplay_var.set(0)
+
+    def _cancel_autoplay(self):
+        """Cancel any pending after-callback. Doesn't touch the toggle."""
+        if self._autoplay_after_id is not None:
+            try:
+                self.root.after_cancel(self._autoplay_after_id)
+            except Exception:
+                pass
+            self._autoplay_after_id = None
+
+    def _autoplay_step(self):
+        """Get a suggestion, highlight it, schedule the click after a delay."""
+        self._autoplay_after_id = None
+        if not self.game_board or self.game_board.game_state != GameState.PLAYING:
+            return
+        if self._inference is None or not self._inference.is_loaded():
+            return  # press-handler should have loaded it; bail safely
+        try:
+            suggestion = self._inference.suggest_move(self.game_board)
+        except Exception as e:
+            print(f"[autoplay] suggest failed: {e}")
+            return
+        if suggestion is None:
+            return
+        self.board_canvas.highlight_cell(suggestion['row'], suggestion['col'])
+        self.root.update_idletasks()
+        # Schedule the actual click after a brief flash of the highlight,
+        # so the user can see what's about to be played
+        self._autoplay_after_id = self.root.after(
+            self._autoplay_show_ms,
+            lambda s=suggestion: self._autoplay_finish_step(s),
+        )
+
+    def _autoplay_finish_step(self, suggestion):
+        """Apply the move and schedule the next step (if game still playing)."""
+        self._autoplay_after_id = None
+        if not self.game_board or self.game_board.game_state != GameState.PLAYING:
+            return
+        self._on_cell_click(suggestion['row'], suggestion['col'])
+        if self.game_board.game_state == GameState.PLAYING:
+            self._autoplay_after_id = self.root.after(
+                self._autoplay_pause_ms, self._autoplay_step)
 
     def _auto_export_record(self, record: GameRecord):
         """If export is enabled, append this record's guess samples to the
@@ -840,6 +1167,7 @@ class MinesweeperGUI:
 
     def _on_close(self):
         """Called when the user closes the window (X button or Game→Exit)."""
+        self._cancel_autoplay()
         self._abandon_current_record()
         # Wait briefly for any in-flight background export to land so we
         # don't lose a finished game's contribution to the .npz. Daemon
