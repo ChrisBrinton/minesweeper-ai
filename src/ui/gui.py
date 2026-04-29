@@ -5,6 +5,8 @@ Implements the classic minesweeper user interface using tkinter
 
 import tkinter as tk
 from tkinter import messagebox, Menu, PhotoImage, font
+import sys
+import threading
 import time
 import os
 from typing import List, Callable, Optional, Dict
@@ -12,6 +14,7 @@ from typing import List, Callable, Optional, Dict
 from game import GameBoard, GameState, CellState
 from .leaderboard import LeaderboardManager, show_leaderboard, congratulate_new_record
 from .history import GameHistoryManager, GameRecord, show_stats
+from .settings import SettingsManager, show_settings
 
 
 _PROFILE_UI = os.environ.get('MINESWEEPER_PROFILE_UI') == '1'
@@ -356,6 +359,10 @@ class MinesweeperGUI:
         # Leaderboard system
         self.leaderboard_manager = LeaderboardManager()
         self.history_manager = GameHistoryManager()
+        self.settings_manager = SettingsManager()
+        # Serializes the off-thread export workers so concurrent finalizes
+        # don't race on the .npz file
+        self._export_lock = threading.Lock()
           # Game components
         self.game_board: Optional[GameBoard] = None
         self.board_canvas: Optional[BoardCanvas] = None
@@ -453,6 +460,7 @@ class MinesweeperGUI:
         game_menu.add_separator()
         game_menu.add_command(label="Best Times...", command=self._show_leaderboard)
         game_menu.add_command(label="Statistics...", command=self._show_stats)
+        game_menu.add_command(label="Settings...", command=self._show_settings)
         game_menu.add_separator()
         game_menu.add_command(label="Exit", command=self._on_close)
         
@@ -764,7 +772,16 @@ class MinesweeperGUI:
             cells_revealed=cells_revealed,
             correct_flags=self._count_correct_player_flags(),
         )
+        # Flush pending UI repaints (win/lose smiley, last-cell reveal,
+        # mine layout reveal on loss, win-time auto-flagging) so they hit the
+        # screen BEFORE any disk I/O — otherwise the user perceives a freeze
+        # between their click and the result render.
+        if result in ('won', 'lost'):
+            self.root.update_idletasks()
         self.history_manager.append(self.current_record)
+        # Auto-export this game's samples if the user opted in
+        if result in ('won', 'lost'):
+            self._auto_export_record(self.current_record)
         self.current_record = None
 
     def _abandon_current_record(self):
@@ -781,9 +798,56 @@ class MinesweeperGUI:
         """Show the statistics dialog."""
         show_stats(self.root, self.history_manager, self.current_difficulty)
 
+    def _show_settings(self):
+        """Show the Settings dialog."""
+        show_settings(self.root, self.settings_manager)
+
+    def _auto_export_record(self, record: GameRecord):
+        """If export is enabled, append this record's guess samples to the
+        configured .npz file on a background daemon thread so disk I/O
+        doesn't block the GUI. The export lock serializes concurrent
+        finalizes. Errors are logged and silently swallowed so a broken
+        export never blocks gameplay."""
+        if not self.settings_manager.export_enabled:
+            return
+        path = self.settings_manager.export_path
+        if not path:
+            return
+
+        # Snapshot the record on the main thread; the worker only sees an
+        # immutable dict so there's no shared mutable state.
+        record_dict = record.to_dict()
+        export_lock = self._export_lock
+
+        def _worker():
+            with export_lock:
+                try:
+                    # Lazy import — pulls in numpy/AI modules; don't load
+                    # at GUI startup.
+                    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(
+                        os.path.abspath(__file__))))
+                    if repo_root not in sys.path:
+                        sys.path.insert(0, repo_root)
+                    import export_training_data as exporter
+                    added = exporter.append_record_to_file(record_dict, path)
+                    if added:
+                        print(f"[export] +{added} samples -> {path}")
+                except Exception as e:
+                    print(f"[export] failed: {e}")
+
+        threading.Thread(target=_worker, daemon=True,
+                         name='minesweeper-export').start()
+
     def _on_close(self):
         """Called when the user closes the window (X button or Game→Exit)."""
         self._abandon_current_record()
+        # Wait briefly for any in-flight background export to land so we
+        # don't lose a finished game's contribution to the .npz. Daemon
+        # threads die abruptly when the process exits, but the export uses
+        # an atomic .tmp.npz->rename so the file itself can't end up
+        # corrupted — we'd just lose the most recent game's samples.
+        if self._export_lock.acquire(timeout=2.0):
+            self._export_lock.release()
         self.root.destroy()
 
     def _show_help(self):
