@@ -74,6 +74,11 @@ CONFIG = {
     'ema_decay': 0.999,
     'use_bf16': True,                   # auto-disabled if device != cuda
     'grad_clip': 1.0,
+    # Desktop-friendliness knobs (set by CLI flags; keeps default training
+    # behaviour unchanged when omitted)
+    'yield_ms': 0,                      # sleep N ms between training batches
+    'active_hours': None,               # tuple (dt_time, dt_time) or None
+    'low_priority': False,
 }
 
 
@@ -91,6 +96,68 @@ PATH_CONFIG = SAVE_DIR / 'config.json'
 
 # Canonical inference target — mirrored from PATH_BEST whenever it improves
 PATH_CANONICAL_INFERENCE = REPO_ROOT / 'best_model.pth'
+
+
+# ─── Desktop-friendliness helpers ────────────────────────────────────────────
+
+def parse_active_hours(spec: str):
+    """Parse 'HH:MM-HH:MM' into (start, end) datetime.time. Wraps midnight ok."""
+    from datetime import time as dt_time
+    try:
+        start_s, end_s = spec.split('-')
+        sh, sm = map(int, start_s.strip().split(':'))
+        eh, em = map(int, end_s.strip().split(':'))
+        return dt_time(sh, sm), dt_time(eh, em)
+    except Exception as e:
+        raise SystemExit(f"--active-hours expects HH:MM-HH:MM, got {spec!r} ({e})")
+
+
+def in_active_window(now, start, end) -> bool:
+    """True if `now` (a datetime) is in [start, end). Handles wrap-around."""
+    t = now.time()
+    if start <= end:
+        return start <= t < end
+    return t >= start or t < end
+
+
+def wait_until_active(window, log_func=None):
+    """If we're outside the active window, sleep (60s polls) until inside.
+    No-op if window is None."""
+    if window is None:
+        return
+    start, end = window
+    if in_active_window(datetime.now(), start, end):
+        return
+    if log_func:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_func(f"[active-hours] outside window {start.strftime('%H:%M')}-"
+                 f"{end.strftime('%H:%M')}, sleeping... (now: {now})")
+    while not in_active_window(datetime.now(), start, end):
+        time.sleep(60)
+    if log_func:
+        log_func(f"[active-hours] window opened, resuming at "
+                 f"{datetime.now().strftime('%H:%M:%S')}")
+
+
+def set_low_priority_windows() -> bool:
+    """Lower this process's priority so the OS scheduler favours foreground
+    apps. Windows-only via the Win32 SetPriorityClass; no-op elsewhere."""
+    if not sys.platform.startswith('win'):
+        return False
+    try:
+        import ctypes
+        BELOW_NORMAL_PRIORITY_CLASS = 0x4000
+        kernel32 = ctypes.windll.kernel32
+        # Default ctypes signatures assume int return — the HANDLE is a
+        # pointer and gets truncated to 32 bits without these. SetPriority
+        # then receives a garbage handle and fails.
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        kernel32.SetPriorityClass.restype = ctypes.c_int
+        return bool(kernel32.SetPriorityClass(
+            kernel32.GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS))
+    except Exception:
+        return False
 
 
 # ─── Atomic save / load ──────────────────────────────────────────────────────
@@ -259,6 +326,9 @@ def generate_data(model: nn.Module, device: torch.device, board_cfg: Dict,
             print(f"  Data gen: {game_idx+1}/{num_games} | "
                   f"Win: {wr:.1%} | Avg guesses: {total_guesses/(game_idx+1):.1f} | "
                   f"Samples: {len(samples):,}", flush=True)
+            # Check active window only at progress checkpoints — once per ~10%
+            # of the run — so the polling cost is negligible
+            wait_until_active(CONFIG.get('active_hours'))
 
     model.train()
     stats = {
@@ -355,6 +425,14 @@ def train_epoch(model: nn.Module, optimizer: optim.Optimizer,
 
         total_loss += batch_loss.item()
         num_batches += 1
+
+        # Yield to display rendering so Windows UI stays responsive
+        yield_ms = CONFIG.get('yield_ms', 0) or 0
+        if yield_ms > 0:
+            time.sleep(yield_ms / 1000.0)
+        # Pause if we've left the active window (in-process pause; preserves
+        # GPU memory but submits no kernels, so display gets full GPU)
+        wait_until_active(CONFIG.get('active_hours'))
 
     return total_loss / max(num_batches, 1)
 
@@ -596,6 +674,19 @@ def main():
                         help='Ignore any existing checkpoint and start fresh')
     parser.add_argument('--no-bf16', action='store_true',
                         help='Disable BF16 even on CUDA (use FP32)')
+    parser.add_argument('--yield-ms', type=int, default=0, metavar='N',
+                        help='Sleep N ms between training batches so the '
+                             'Windows UI stays responsive. Try 5-15 if the '
+                             'desktop locks up during training. Default: 0.')
+    parser.add_argument('--active-hours', metavar='HH:MM-HH:MM', default=None,
+                        help='Only train inside this time window (e.g. '
+                             '20:00-04:00). Outside the window, the script '
+                             'pauses in-process — no kernels submitted, so '
+                             'display gets full GPU. Wraps midnight ok.')
+    parser.add_argument('--low-priority', action='store_true',
+                        help='Set this process priority to BELOW_NORMAL '
+                             '(Windows). Helps the OS scheduler favour '
+                             'foreground apps.')
     args = parser.parse_args()
 
     device = get_device(args.device)
@@ -612,8 +703,17 @@ def main():
         config['learning_rate'] = args.lr
     if args.no_bf16:
         config['use_bf16'] = False
+    if args.yield_ms:
+        config['yield_ms'] = max(0, int(args.yield_ms))
+    if args.active_hours:
+        config['active_hours'] = parse_active_hours(args.active_hours)
+    config['low_priority'] = bool(args.low_priority)
     # In-process write so worker funcs see updated values
     CONFIG.update(config)
+
+    if config['low_priority']:
+        ok = set_low_priority_windows()
+        print(f"Process priority lowered: {ok}", flush=True)
 
     # Persist config for the run
     with open(PATH_CONFIG, 'w') as f:
@@ -698,6 +798,10 @@ def main():
                   f"{config['cross_iteration_patience']} iters\n"
                   f"Iterations: {config['num_iterations']} (starting at "
                   f"{start_iteration}) | Eval episodes: {config['eval_episodes']}\n"
+                  f"Yield: {config['yield_ms']}ms/batch | "
+                  f"Active hours: "
+                  f"{('-'.join(t.strftime('%H:%M') for t in config['active_hours'])) if config['active_hours'] else 'always'} | "
+                  f"Low-priority: {config['low_priority']}\n"
                   f"{resume_msg}\n"
                   f"Save dir: {SAVE_DIR}\n"
                   f"{'='*70}\n")
@@ -726,6 +830,9 @@ def main():
 
         try:
             for iteration in range(start_iteration, config['num_iterations'] + 1):
+                # Pause at the iteration boundary if we're outside active hours
+                wait_until_active(config.get('active_hours'),
+                                  log_func=lambda m: log_file.write(m + '\n') or print(m, flush=True))
                 current_iter_holder[0] = iteration
                 iter_start = time.time()
                 msg = f"\n{'-'*70}\nITERATION {iteration}/{config['num_iterations']}\n{'-'*70}\n"
