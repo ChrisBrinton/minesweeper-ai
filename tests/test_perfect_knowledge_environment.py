@@ -157,7 +157,7 @@ class TestEnvironmentRewards:
         # Check that special reward config is applied
         assert env.reward_config['flag_correct'] == 10.0, "Flag correct reward should be enhanced"
         assert env.reward_config['flag_incorrect'] == -15.0, "Flag incorrect penalty should be enhanced"
-        assert env.reward_config['win'] == 150.0, "Win reward should be standard"
+        assert env.reward_config['win'] == 250.0, "Win reward should be standard"
     
     def test_step_rewards(self):
         """Test that step rewards work correctly"""

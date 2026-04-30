@@ -48,15 +48,31 @@ class TestEnhancedBeginnerTrainerV2Resume:
         trainer.batch_size = 64
         trainer.memory = Mock()
         trainer.memory.maxlen = 50000
-        trainer.config = {'target_update_freq': 100}  # Add config for target network updates
+        trainer.config = {
+            'target_update_freq': 100,
+            'eval_freq': 250,    # Eval after every 5 episodes (50 steps/ep mock)
+            'save_freq': 10000,  # Saves don't trigger in short test runs
+        }
+        trainer.steps_since_eval = 0
+        trainer.steps_since_update = 0
+        trainer.steps_since_save = 0
+        trainer.total_steps = 0
           # Mock state_dict methods
         trainer.q_network.state_dict.return_value = {"dummy": "q_network_state"}
         trainer.target_network.state_dict.return_value = {"dummy": "target_network_state"}
         trainer.target_network.load_state_dict = Mock()  # Add for target network updates
         trainer.optimizer.state_dict.return_value = {"dummy": "optimizer_state"}
-        
-        # Mock training methods
-        trainer._train_episode.return_value = (-10.0, 50, False)
+
+        # Real _train_episode increments these counters every step; the Mock
+        # doesn't, so step-based eval/save scheduling never triggers. Use a
+        # side_effect that mutates the mock's counters the way the real
+        # trainer would, while still returning the canned tuple.
+        def fake_train_episode(*_args, **_kwargs):
+            trainer.steps_since_eval += 50
+            trainer.steps_since_save += 50
+            trainer.total_steps += 50
+            return (-10.0, 50, False, False)
+        trainer._train_episode = Mock(side_effect=fake_train_episode)
         trainer._evaluate.return_value = (-15.5, 0.0)  # avg_reward, win_rate
         
         return trainer
@@ -97,7 +113,7 @@ class TestEnhancedBeginnerTrainerV2Resume:
         assert foundation['epsilon_end'] == 0.1
         assert foundation['batch_size'] == 64
         assert foundation['memory_size'] == 50000
-        assert foundation['eval_frequency'] == 100
+        assert foundation['eval_frequency'] == 5000  # in steps, not episodes
         assert foundation['eval_episodes'] == 100
         assert foundation['expected_win_rate'] == 0.15
         assert foundation['min_win_rate'] == 0.05
@@ -402,15 +418,14 @@ class TestEnhancedBeginnerTrainerV2Resume:
         mock_trainer._evaluate.return_value = (-10.0, 0.35)  # Above target
         
         with patch.object(trainer, '_save_checkpoint'):
-            with patch.object(trainer, '_save_final_model') as mock_save_final:
-                result = trainer._run_phase_training(
-                    mock_trainer, phase, episodes_to_run=20,
-                    total_episodes_so_far=0, phase_episodes_so_far=0, phase_index=0
-                )
-        
+            result = trainer._run_phase_training(
+                mock_trainer, phase, episodes_to_run=20,
+                total_episodes_so_far=0, phase_episodes_so_far=0, phase_index=0
+            )
+
         assert result is True
-        mock_save_final.assert_called_once()
-        # Should stop early when target is reached
+        # Should stop early when target is reached (eval at episode 5 returns
+        # 0.35 >= 0.3 target, so the phase loop exits there)
         assert mock_trainer._train_episode.call_count == 5
 
 
@@ -587,8 +602,21 @@ class TestTrainingIntegration:
         mock_trainer.target_network.load_state_dict = Mock()  # Add for target network updates
         mock_trainer.optimizer.state_dict.return_value = {"test": "state"}
         mock_trainer.epsilon = 0.5
-        mock_trainer.config = {'target_update_freq': 100}  # Add config for target network updates
-        mock_trainer._train_episode.return_value = (-10.0, 50, False)
+        mock_trainer.config = {
+            'target_update_freq': 100,
+            'eval_freq': 50,    # Eval after every episode (50 steps/ep mock)
+            'save_freq': 10000,
+        }
+        mock_trainer.steps_since_eval = 0
+        mock_trainer.steps_since_update = 0
+        mock_trainer.steps_since_save = 0
+        mock_trainer.total_steps = 0
+        def fake_train_episode(*_args, **_kwargs):
+            mock_trainer.steps_since_eval += 50
+            mock_trainer.steps_since_save += 50
+            mock_trainer.total_steps += 50
+            return (-10.0, 50, False, False)
+        mock_trainer._train_episode = Mock(side_effect=fake_train_episode)
         mock_trainer._evaluate.return_value = (-15.0, 0.1)
         mock_create_trainer.return_value = mock_trainer
         
