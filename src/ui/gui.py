@@ -11,6 +11,8 @@ import time
 import os
 from typing import List, Callable, Optional, Dict
 
+from PIL import Image, ImageTk
+
 from game import GameBoard, GameState, CellState
 from .leaderboard import LeaderboardManager, show_leaderboard, congratulate_new_record
 from .history import GameHistoryManager, GameRecord, show_stats
@@ -292,6 +294,8 @@ class BoardCanvas(tk.Canvas):
         self.bind('<Button-1>', self._on_left_click)
         self.bind('<Button-3>', self._on_right_click)
 
+        self._heatmap_ids: List[int] = []
+
         # Highlight overlay for the AI Suggest button — drawn on top of cell
         # sprites, hidden by default. tag_raise keeps it above all images.
         self._highlight_id = self.create_rectangle(
@@ -311,6 +315,100 @@ class BoardCanvas(tk.Canvas):
 
     def clear_highlight(self):
         self.itemconfigure(self._highlight_id, state='hidden')
+
+    # ── Heatmap overlay ──────────────────────────────────────────────────
+
+    _HEATMAP_STEPS = 20
+
+    @classmethod
+    def _build_heatmap_palette(cls):
+        """Pre-render overlay images: red gradient, green for safe, lavender for best guess."""
+        if hasattr(cls, '_heatmap_images'):
+            return
+        cls._heatmap_images: List[ImageTk.PhotoImage] = []
+        sz = cls.CELL_SIZE
+        for i in range(cls._HEATMAP_STEPS + 1):
+            alpha = int(180 * i / cls._HEATMAP_STEPS)
+            img = Image.new('RGBA', (sz, sz), (255, 40, 40, alpha))
+            cls._heatmap_images.append(ImageTk.PhotoImage(img))
+        cls._heatmap_green = ImageTk.PhotoImage(
+            Image.new('RGBA', (sz, sz), (40, 200, 40, 160)))
+        cls._heatmap_lavender = ImageTk.PhotoImage(
+            Image.new('RGBA', (sz, sz), (180, 130, 255, 160)))
+        cls._heatmap_warning = ImageTk.PhotoImage(
+            Image.new('RGBA', (sz, sz), (255, 200, 0, 140)))
+
+    def show_heatmap(self, probabilities):
+        """Draw colored overlays on hidden cells based on P(mine).
+
+        Green: solver-determined safe cells (click with certainty).
+        Lavender: model's best guess(es) among uncertain cells.
+        Red gradient: mine risk for everything else.
+        """
+        self._build_heatmap_palette()
+        self.clear_heatmap()
+        import numpy as np
+        steps = self._HEATMAP_STEPS
+        palette = self._heatmap_images
+        green = self._heatmap_green
+        lavender = self._heatmap_lavender
+        ids = self._heatmap_ids
+
+        # Best-guess threshold: lowest P(mine) among uncertain cells
+        # (not solver-determined 0.0 or 1.0).
+        best_p = None
+        for r in range(self.rows):
+            for c in range(self.cols):
+                p = probabilities[r, c]
+                if not np.isnan(p) and 0.0 < p < 1.0:
+                    if best_p is None or p < best_p:
+                        best_p = p
+
+        for r in range(self.rows):
+            for c in range(self.cols):
+                p = probabilities[r, c]
+                if np.isnan(p):
+                    continue
+                x = c * self.CELL_SIZE
+                y = r * self.CELL_SIZE
+                if p == 0.0:
+                    item = self.create_image(x, y, image=green, anchor='nw')
+                elif best_p is not None and 0.0 < p < 1.0 and abs(p - best_p) < 1e-6:
+                    item = self.create_image(x, y, image=lavender, anchor='nw')
+                else:
+                    idx = max(0, min(steps, int(round(p * steps))))
+                    if idx == 0:
+                        continue
+                    item = self.create_image(x, y, image=palette[idx], anchor='nw')
+                ids.append(item)
+        self.tag_raise(self._highlight_id)
+
+    def show_comparison_heatmap(self, probabilities, divergence):
+        """Draw heatmap with divergence warnings.
+
+        Uses the standard red/green/lavender overlay for probabilities,
+        but highlights cells where model and constraint engine disagree
+        by >0.15 with a yellow warning overlay.
+        """
+        self.show_heatmap(probabilities)
+        import numpy as np
+        self._build_heatmap_palette()
+        warning = self._heatmap_warning
+        ids = self._heatmap_ids
+        for r in range(self.rows):
+            for c in range(self.cols):
+                d = divergence[r, c]
+                if not np.isnan(d) and d > 0.15:
+                    x = c * self.CELL_SIZE
+                    y = r * self.CELL_SIZE
+                    item = self.create_image(x, y, image=warning, anchor='nw')
+                    ids.append(item)
+        self.tag_raise(self._highlight_id)
+
+    def clear_heatmap(self):
+        for item in self._heatmap_ids:
+            self.delete(item)
+        self._heatmap_ids.clear()
 
     def _xy_to_rc(self, x: int, y: int):
         c = x // self.CELL_SIZE
@@ -405,6 +503,7 @@ class MinesweeperGUI:
         self.live_progress_label: Optional[tk.Label] = None
         self.suggest_button: Optional[tk.Button] = None
         self.autoplay_button: Optional[tk.Button] = None
+        self.heatmap_button: Optional[tk.Checkbutton] = None
         # Lazy MinesweeperInference; constructed on first Suggest click
         self._inference = None
         # Auto-play loop state — Tk after-id of the next pending step (or None)
@@ -452,28 +551,46 @@ class MinesweeperGUI:
         self.timer_display = DigitalDisplay(top_frame)
         self.timer_display.pack(side='right')
 
-        # Live in-game rate stats (cells/min, flags/min, progress%) +
-        # Suggest button. Pack order on the right side matters: the
-        # FIRST .pack(side='right', ...) ends up rightmost, so suggest
-        # is packed first to keep it at the far right edge.
+        # Live stats + AI buttons.  Two-row layout so everything fits
+        # within the board width:
+        #   Row 1: Cells/min  |  Progress   |  [Auto-play  ]
+        #   Row 2: Flags/min  |  Safe: N    |  [Suggest move]
+        #                                      [Heatmap     ]
         live_frame = tk.Frame(main_frame, bg='lightgray')
         live_frame.pack(fill='x', padx=5, pady=(0, 5))
+
+        stats_frame = tk.Frame(live_frame, bg='lightgray')
+        stats_frame.pack(side='left', fill='both', expand=True)
+
+        stats_row1 = tk.Frame(stats_frame, bg='lightgray')
+        stats_row1.pack(fill='x')
+        stats_row2 = tk.Frame(stats_frame, bg='lightgray')
+        stats_row2.pack(fill='x')
+
         self.live_cpm_label = tk.Label(
-            live_frame, text='Cells/min: —',
+            stats_row1, text='Cells/min: —', width=14, anchor='w',
             font=('Arial', 9), bg='lightgray', fg='black',
         )
-        self.live_cpm_label.pack(side='left', padx=8)
+        self.live_cpm_label.pack(side='left', padx=(8, 0))
         self.live_progress_label = tk.Label(
-            live_frame, text='Progress: —',
+            stats_row1, text='Progress: —', width=13, anchor='w',
             font=('Arial', 9), bg='lightgray', fg='black',
         )
-        self.live_progress_label.pack(side='left', expand=True)
+        self.live_progress_label.pack(side='left', padx=8)
+
+        self.live_fpm_label = tk.Label(
+            stats_row2, text='Flags/min: —', width=14, anchor='w',
+            font=('Arial', 9), bg='lightgray', fg='black',
+        )
+        self.live_fpm_label.pack(side='left', padx=(8, 0))
+        self.safe_count_label = tk.Label(
+            stats_row2, text='Safe: —', width=9, anchor='w',
+            font=('Arial', 9), bg='lightgray', fg='#0a7d0a',
+        )
+        if self.settings_manager.safe_count_enabled:
+            self.safe_count_label.pack(side='left', padx=8)
+
         # AI action buttons: vertical stack on the right
-        # (Auto-play above Suggest, both disabled outside PLAYING state).
-        # Auto-play is a toggle Checkbutton with indicatoron=False — Tk's
-        # canonical toggle-button pattern. It looks raised when off and
-        # sunken with selectcolor fill when on.
-        # The whole stack is shown/hidden based on the AI-enabled setting.
         self._ai_button_stack = tk.Frame(live_frame, bg='lightgray')
         self.autoplay_var = tk.IntVar(value=0)
         self.autoplay_button = tk.Checkbutton(
@@ -481,7 +598,7 @@ class MinesweeperGUI:
             font=('Arial', 9), state='disabled',
             variable=self.autoplay_var,
             indicatoron=False,
-            selectcolor='#fff3a8',  # pale yellow when toggled on
+            selectcolor='#fff3a8',
             width=14,
             command=self._on_autoplay_toggle,
         )
@@ -492,17 +609,26 @@ class MinesweeperGUI:
             command=self._on_suggest_click,
         )
         self.suggest_button.pack(fill='x')
-        # live_fpm_label always exists; pack order on the right side is
-        # managed by _show_ai_buttons / _hide_ai_buttons so the stack
-        # ends up rightmost when shown.
-        self.live_fpm_label = tk.Label(
-            live_frame, text='Flags/min: —',
-            font=('Arial', 9), bg='lightgray', fg='black',
+        self.confidence_label = tk.Label(
+            self._ai_button_stack, text='',
+            font=('Arial', 8), bg='lightgray', fg='#666',
+            anchor='center',
         )
+        self.confidence_label.pack(fill='x')
+        self.heatmap_var = tk.IntVar(value=0)
+        self.heatmap_button = tk.Checkbutton(
+            self._ai_button_stack, text='Heatmap',
+            font=('Arial', 9), state='disabled',
+            variable=self.heatmap_var,
+            indicatoron=False,
+            selectcolor='#ffcccc',
+            width=14,
+            command=self._on_heatmap_toggle,
+        )
+        self.heatmap_button.pack(fill='x')
+
         if self.settings_manager.ai_enabled:
             self._show_ai_buttons()
-        else:
-            self.live_fpm_label.pack(side='right', padx=8)
 
         # Game board frame
         self.game_frame = tk.Frame(main_frame, bg='lightgray')
@@ -576,9 +702,12 @@ class MinesweeperGUI:
         else:
             # Same size: just repaint to hidden via dirty tracking
             self._update_display()
-            # And clear any stale AI suggestion overlay
+            # And clear any stale AI overlays
             if self.board_canvas is not None:
                 self.board_canvas.clear_highlight()
+                self.board_canvas.clear_heatmap()
+        self.heatmap_var.set(0)
+        self.confidence_label.config(text='')
 
         self._reset_live_stats()
         self._update_action_buttons()
@@ -634,6 +763,7 @@ class MinesweeperGUI:
         self._update_display()
         self._update_live_stats()
         self._update_action_buttons()
+        self._refresh_heatmap()
 
         # Handle game end
         if self.game_board.game_state in [GameState.WON, GameState.LOST]:
@@ -667,6 +797,7 @@ class MinesweeperGUI:
         # Update displays
         self._update_display()
         self._update_live_stats()
+        self._refresh_heatmap()
     
     def _update_display(self):
         """Update all visual elements"""
@@ -714,6 +845,8 @@ class MinesweeperGUI:
         if self.live_progress_label is not None:
             self.live_progress_label.config(
                 text='Progress: —', fg='black', font=('Arial', 9))
+        if self.safe_count_label is not None:
+            self.safe_count_label.config(text='Safe: —')
 
     def _update_live_stats(self):
         """Refresh the live cells/min, flags/min, and progress% labels.
@@ -734,6 +867,8 @@ class MinesweeperGUI:
                 cells_for_progress -= 1
             pct = 100.0 * cells_for_progress / total_safe
             self.live_progress_label.config(text=f'Progress: {pct:.0f}%')
+
+        self._update_safe_count()
 
         ai_used = bool(self.current_record and self.current_record.ai_used)
         if ai_used:
@@ -770,6 +905,22 @@ class MinesweeperGUI:
             font=('Arial', 9, 'bold') if fpm_record else ('Arial', 9),
         )
     
+    def _update_safe_count(self):
+        """Update the solver safe-cell count label (if enabled)."""
+        if self.safe_count_label is None or not self.settings_manager.safe_count_enabled:
+            return
+        if not self.game_board or self.game_board.game_state != GameState.PLAYING:
+            self.safe_count_label.config(text='Safe: —')
+            return
+        from src.ai.inference import _state_from_board
+        from src.ai.algorithmic_solver import AlgorithmicSolver
+        state = _state_from_board(self.game_board)
+        solver = AlgorithmicSolver(
+            self.game_board.rows, self.game_board.cols, self.game_board.total_mines)
+        hidden, flagged, revealed = solver._parse_state(state)
+        safe, _ = solver._find_deterministic_moves(hidden, flagged, revealed)
+        self.safe_count_label.config(text=f'Safe: {len(safe)}')
+
     def _end_game(self):
         """Handle game end"""
         # Stop timer
@@ -908,24 +1059,21 @@ class MinesweeperGUI:
                 # Tear everything down — no buttons, no model in memory
                 self._stop_autoplay()
                 self._hide_ai_buttons()
+            if self.settings_manager.safe_count_enabled:
+                self.safe_count_label.pack(side='left', padx=8)
+                self._update_safe_count()
+            else:
+                self.safe_count_label.pack_forget()
         show_settings(self.root, self.settings_manager,
                       on_changed=_on_settings_changed)
 
     def _show_ai_buttons(self):
-        """Pack the AI button stack rightmost on the live-stats row.
-
-        Re-packs live_fpm_label too so the visual order stays
-        |cells | progress(expand) | flags/min | [Auto-play / Suggest stack]|
-        regardless of any prior pack_forget calls.
-        """
-        self.live_fpm_label.pack_forget()
+        """Pack the AI button stack on the right side of the live-stats area."""
         self._ai_button_stack.pack(side='right', padx=8)
-        self.live_fpm_label.pack(side='right', padx=8)
-        # Sync enabled state with current game state
         self._update_action_buttons()
 
     def _hide_ai_buttons(self):
-        """Remove the AI button stack from the live-stats row."""
+        """Remove the AI button stack from the live-stats area."""
         self._ai_button_stack.pack_forget()
 
     def _maybe_preload_model(self):
@@ -968,6 +1116,12 @@ class MinesweeperGUI:
             if state == 'disabled' and self.autoplay_var.get():
                 self.autoplay_var.set(0)
                 self._cancel_autoplay()
+        if self.heatmap_button is not None:
+            self.heatmap_button.config(state=state)
+            if state == 'disabled' and self.heatmap_var.get():
+                self.heatmap_var.set(0)
+                if self.board_canvas is not None:
+                    self.board_canvas.clear_heatmap()
 
     def _mark_ai_used(self):
         """Flag the current game as AI-assisted. Idempotent."""
@@ -1036,6 +1190,95 @@ class MinesweeperGUI:
         if suggestion is None:
             return
         self.board_canvas.highlight_cell(suggestion['row'], suggestion['col'])
+
+        mp = suggestion.get('mine_probability')
+        source = suggestion.get('source', '')
+        if source == 'solver':
+            self.confidence_label.config(text='Source: solver (safe)', fg='#0a7d0a')
+        elif mp is not None:
+            if mp < 0.15:
+                color = '#0a7d0a'
+            elif mp < 0.35:
+                color = '#b8860b'
+            else:
+                color = '#cc0000'
+            self.confidence_label.config(text=f'P(mine): {mp:.0%}', fg=color)
+        else:
+            self.confidence_label.config(text='')
+
+    def _on_heatmap_toggle(self):
+        if self.heatmap_var.get():
+            self._mark_ai_used()
+            self._refresh_heatmap()
+        else:
+            if self.board_canvas is not None:
+                self.board_canvas.clear_heatmap()
+
+    def _refresh_heatmap(self):
+        """Recompute and redraw the heatmap overlay (if the toggle is on)."""
+        if not self.heatmap_var.get():
+            return
+        if not self.game_board or self.game_board.game_state != GameState.PLAYING:
+            return
+
+        source = self.settings.heatmap_source
+
+        if source == 'constraint':
+            inf = self._ensure_inference()
+            if inf is None:
+                return
+            try:
+                prob_data = inf.get_constraint_probabilities(self.game_board)
+            except Exception as e:
+                messagebox.showerror('Heatmap failed', str(e))
+                self.heatmap_var.set(0)
+                return
+            if prob_data is None:
+                return
+            self.board_canvas.show_heatmap(prob_data['probabilities'])
+
+        elif source == 'both':
+            inf = self._ensure_inference()
+            if inf is None:
+                return
+            try:
+                prob_data = inf.get_comparison_probabilities(self.game_board)
+            except FileNotFoundError as e:
+                messagebox.showerror(
+                    'AI model not found',
+                    f'{e}\n\nSet the model path in Game → Settings.')
+                self._inference = None
+                self.heatmap_var.set(0)
+                return
+            except Exception as e:
+                messagebox.showerror('Heatmap failed', str(e))
+                self.heatmap_var.set(0)
+                return
+            if prob_data is None:
+                return
+            self.board_canvas.show_comparison_heatmap(
+                prob_data['probabilities'], prob_data['divergence'])
+
+        else:
+            inf = self._ensure_inference()
+            if inf is None:
+                return
+            try:
+                prob_data = inf.get_mine_probabilities(self.game_board)
+            except FileNotFoundError as e:
+                messagebox.showerror(
+                    'AI model not found',
+                    f'{e}\n\nSet the model path in Game → Settings.')
+                self._inference = None
+                self.heatmap_var.set(0)
+                return
+            except Exception as e:
+                messagebox.showerror('Heatmap failed', str(e))
+                self.heatmap_var.set(0)
+                return
+            if prob_data is None:
+                return
+            self.board_canvas.show_heatmap(prob_data['probabilities'])
 
     def _on_autoplay_toggle(self):
         """User clicked Auto-play. Tk has already toggled autoplay_var, so

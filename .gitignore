@@ -230,6 +230,7 @@ logs/
 *.pt
 *.onnx
 models/
+!models/MODEL_HISTORY.md
 models_cuda/
 demo_models/
 checkpoints/

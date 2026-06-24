@@ -47,9 +47,11 @@ class SettingsManager:
     def _defaults(self) -> Dict:
         return {
             'ai_functions_enabled': True,
+            'show_safe_count': False,
             'export_training_data': False,
             'export_path': _default_export_path(),
             'model_path': _default_model_path(),
+            'heatmap_source': 'hybrid',
         }
 
     def _load(self) -> Dict:
@@ -80,6 +82,10 @@ class SettingsManager:
         return bool(self.data.get('ai_functions_enabled', True))
 
     @property
+    def safe_count_enabled(self) -> bool:
+        return bool(self.data.get('show_safe_count', False))
+
+    @property
     def export_enabled(self) -> bool:
         return bool(self.data.get('export_training_data'))
 
@@ -90,6 +96,10 @@ class SettingsManager:
     @property
     def model_path(self) -> str:
         return self.data.get('model_path') or _default_model_path()
+
+    @property
+    def heatmap_source(self) -> str:
+        return self.data.get('heatmap_source', 'hybrid')
 
     def update(self, **kwargs):
         for k, v in kwargs.items():
@@ -128,44 +138,74 @@ class SettingsDialog:
             variable=self.ai_var, font=('Arial', 10),
         ).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 10))
 
+        self.safe_count_var = tk.BooleanVar(value=self.settings.safe_count_enabled)
+        Checkbutton(
+            body, text='Show solver safe-cell count during play',
+            variable=self.safe_count_var, font=('Arial', 10),
+        ).grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 10))
+
         # Export toggle
         self.export_var = tk.BooleanVar(value=self.settings.export_enabled)
         Checkbutton(
             body, text='Export training data after each completed game',
             variable=self.export_var, font=('Arial', 10),
-        ).grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 10))
+        ).grid(row=2, column=0, columnspan=3, sticky='w', pady=(0, 10))
 
         # Export path entry + browse
         Label(body, text='Export file:', font=('Arial', 10)).grid(
-            row=2, column=0, sticky='w', padx=(0, 5))
+            row=3, column=0, sticky='w', padx=(0, 5))
         self.path_var = tk.StringVar(value=self.settings.export_path)
         Entry(body, textvariable=self.path_var, width=42).grid(
-            row=2, column=1, sticky='ew')
+            row=3, column=1, sticky='ew')
         Button(body, text='Browse...', command=self._browse).grid(
-            row=2, column=2, padx=(5, 0))
+            row=3, column=2, padx=(5, 0))
 
         Label(
             body,
             text='Each finalized game appends its guess samples to this file.\n'
                  'Use export_training_data.py to rebuild from full history.',
             font=('Arial', 8), fg='#666', justify='left',
-        ).grid(row=3, column=0, columnspan=3, sticky='w', pady=(5, 10))
+        ).grid(row=4, column=0, columnspan=3, sticky='w', pady=(5, 10))
 
         # AI model path entry + browse
         Label(body, text='AI model:', font=('Arial', 10)).grid(
-            row=4, column=0, sticky='w', padx=(0, 5))
+            row=5, column=0, sticky='w', padx=(0, 5))
         self.model_var = tk.StringVar(value=self.settings.model_path)
         Entry(body, textvariable=self.model_var, width=42).grid(
-            row=4, column=1, sticky='ew')
+            row=5, column=1, sticky='ew')
         Button(body, text='Browse...', command=self._browse_model).grid(
-            row=4, column=2, padx=(5, 0))
+            row=5, column=2, padx=(5, 0))
 
         Label(
             body,
             text='Used by the Suggest-move button. Leave at default if you copied\n'
                  'best_model.pth into the project root.',
             font=('Arial', 8), fg='#666', justify='left',
-        ).grid(row=5, column=0, columnspan=3, sticky='w', pady=(5, 0))
+        ).grid(row=6, column=0, columnspan=3, sticky='w', pady=(5, 10))
+
+        # Heatmap source selector
+        Label(body, text='Heatmap source:', font=('Arial', 10)).grid(
+            row=7, column=0, sticky='w', padx=(0, 5))
+        self.heatmap_source_var = tk.StringVar(value=self.settings.heatmap_source)
+        heatmap_frame = Frame(body)
+        heatmap_frame.grid(row=7, column=1, columnspan=2, sticky='w')
+        for value, label in [
+            ('hybrid', 'Hybrid (solver + model)'),
+            ('constraint', 'Constraint engine'),
+            ('both', 'Both (comparison)'),
+        ]:
+            tk.Radiobutton(
+                heatmap_frame, text=label, variable=self.heatmap_source_var,
+                value=value, font=('Arial', 9),
+            ).pack(anchor='w')
+
+        Label(
+            body,
+            text='Hybrid uses solver for deterministic cells + model for uncertain.\n'
+                 'Constraint engine computes exact P(mine) from board logic.\n'
+                 'Both shows model vs constraint engine for comparison.',
+            font=('Arial', 8), fg='#666', justify='left',
+        ).grid(row=8, column=0, columnspan=3, sticky='w', pady=(2, 0))
 
         # OK / Cancel
         btns = Frame(self.dialog, padx=15, pady=15)
@@ -205,9 +245,11 @@ class SettingsDialog:
             return
         self.settings.update(
             ai_functions_enabled=self.ai_var.get(),
+            show_safe_count=self.safe_count_var.get(),
             export_training_data=self.export_var.get(),
             export_path=path,
             model_path=self.model_var.get().strip(),
+            heatmap_source=self.heatmap_source_var.get(),
         )
         if self.on_changed:
             self.on_changed()

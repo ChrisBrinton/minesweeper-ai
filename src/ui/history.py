@@ -199,15 +199,20 @@ class GameHistoryManager:
     def all_records(self) -> List[Dict]:
         return list(self._records)
 
-    def stats_for(self, difficulty: str) -> Dict:
+    def stats_for(self, difficulty: str, last_n: Optional[int] = None) -> Dict:
         """Aggregate stats for one difficulty.
 
         AI-assisted games (records with ai_used=True) are excluded — they
         don't count toward personal records.
+
+        If *last_n* is set, only the most recent *last_n* non-AI games of
+        the given difficulty are considered.
         """
         games = [r for r in self._records
                  if r.get('difficulty') == difficulty
                  and not r.get('ai_used', False)]
+        if last_n is not None:
+            games = games[-last_n:]
         played = len(games)
         won = sum(1 for r in games if r.get('result') == 'won')
         lost = sum(1 for r in games if r.get('result') == 'lost')
@@ -263,6 +268,29 @@ class GameHistoryManager:
             'best_flags_per_minute': best_fpm if win_records else None,
         }
 
+    def peak_rolling_win_rate(self, difficulty: str, window: int = 100
+                              ) -> Optional[float]:
+        """Highest win rate over any sliding window of *window* games.
+
+        Uses the same won/(won+lost) formula as stats_for, so abandoned
+        games don't count against the rate.  Returns None when fewer than
+        *window* games have been played.
+        """
+        games = [r for r in self._records
+                 if r.get('difficulty') == difficulty
+                 and not r.get('ai_used', False)]
+        if len(games) < window:
+            return None
+
+        best = 0.0
+        for start in range(len(games) - window + 1):
+            chunk = games[start:start + window]
+            won = sum(1 for r in chunk if r.get('result') == 'won')
+            lost = sum(1 for r in chunk if r.get('result') == 'lost')
+            if won + lost:
+                best = max(best, won / (won + lost))
+        return best
+
     def best_rates_for(self, difficulty: str) -> Dict[str, float]:
         """Return best cells/min and flags/min over winning games.
 
@@ -274,9 +302,15 @@ class GameHistoryManager:
             'flags_per_minute': s.get('best_flags_per_minute') or 0.0,
         }
 
-    def overall_stats(self) -> Dict:
-        """Aggregate across all difficulties. Excludes AI-assisted games."""
+    def overall_stats(self, last_n: Optional[int] = None) -> Dict:
+        """Aggregate across all difficulties. Excludes AI-assisted games.
+
+        If *last_n* is set, only the most recent *last_n* non-AI games
+        (across all difficulties) are considered.
+        """
         clean = [r for r in self._records if not r.get('ai_used', False)]
+        if last_n is not None:
+            clean = clean[-last_n:]
         played = len(clean)
         total_seconds = sum(r.get('elapsed_seconds', 0) for r in clean)
         return {
@@ -304,8 +338,11 @@ def _format_total(seconds: int) -> str:
     return f"{h}h {m}m"
 
 
+LAST_N = 100
+
+
 class StatsDialog:
-    """Per-difficulty statistics dialog."""
+    """Per-difficulty statistics dialog with All-Time and Last-100 columns."""
 
     LABELS = (
         ('Games played', 'played'),
@@ -313,6 +350,7 @@ class StatsDialog:
         ('Lost', 'lost'),
         ('Abandoned', 'abandoned'),
         ('Win rate', '_win_rate_pct'),
+        ('Peak win rate', '_peak_wr_pct'),
         ('Average win time', '_avg_win_str'),
         ('Best win time', '_best_win_str'),
         ('Current win streak', 'current_streak'),
@@ -328,7 +366,7 @@ class StatsDialog:
 
         self.dialog = Toplevel(parent)
         self.dialog.title('Statistics')
-        self.dialog.geometry('400x480')
+        self.dialog.geometry('560x600')
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -359,32 +397,61 @@ class StatsDialog:
         body = Frame(self.dialog, padx=20, pady=10)
         body.pack(fill='both', expand=True)
 
-        self.value_labels: Dict[str, Label] = {}
-        for i, (label_text, key) in enumerate(self.LABELS):
+        # Column headers
+        Label(body, text='', width=22).grid(row=0, column=0)
+        Label(body, text='All Time', font=('Arial', 10, 'bold'),
+              width=12, anchor='center').grid(row=0, column=1, pady=(0, 4))
+        Label(body, text=f'Last {LAST_N}', font=('Arial', 10, 'bold'),
+              width=12, anchor='center').grid(row=0, column=2, pady=(0, 4))
+
+        self.all_labels: Dict[str, Label] = {}
+        self.recent_labels: Dict[str, Label] = {}
+        for i, (label_text, key) in enumerate(self.LABELS, start=1):
             Label(body, text=label_text + ':', font=('Arial', 10),
                   anchor='w', width=22).grid(row=i, column=0, sticky='w', pady=2)
-            v = Label(body, text='—', font=('Courier', 10), anchor='w')
-            v.grid(row=i, column=1, sticky='w', pady=2)
-            self.value_labels[key] = v
+            v_all = Label(body, text='—', font=('Courier', 10), anchor='center', width=12)
+            v_all.grid(row=i, column=1, pady=2)
+            self.all_labels[key] = v_all
+            v_recent = Label(body, text='—', font=('Courier', 10), anchor='center', width=12)
+            v_recent.grid(row=i, column=2, pady=2)
+            self.recent_labels[key] = v_recent
+
+        # Streak histogram
+        sep1 = ttk.Separator(self.dialog, orient='horizontal')
+        sep1.pack(fill='x', padx=20, pady=(10, 5))
+        Label(self.dialog, text=f'Last {LAST_N} games',
+              font=('Arial', 9, 'bold'), fg='#555').pack(pady=(2, 0))
+        self.canvas = tk.Canvas(
+            self.dialog, width=510, height=70,
+            bg='#f8f8f8', highlightthickness=1, highlightbackground='#ddd',
+        )
+        self.canvas.pack(padx=25, pady=(2, 0))
+        legend = Frame(self.dialog)
+        legend.pack(pady=(1, 0))
+        for color, text in (('#22c55e', 'Win'), ('#ef4444', 'Loss'),
+                            ('#9ca3af', 'Abandoned')):
+            Label(legend, text='█', fg=color,
+                  font=('Arial', 8)).pack(side='left')
+            Label(legend, text=text, font=('Arial', 8),
+                  fg='#777').pack(side='left', padx=(0, 6))
 
         # Overall footer
-        sep = ttk.Separator(self.dialog, orient='horizontal')
-        sep.pack(fill='x', padx=20, pady=(10, 5))
+        sep2 = ttk.Separator(self.dialog, orient='horizontal')
+        sep2.pack(fill='x', padx=20, pady=(6, 5))
         self.overall_label = Label(self.dialog, text='', font=('Arial', 9), fg='#555')
-        self.overall_label.pack(pady=2)
-
-        Button(self.dialog, text='Close', command=self.dialog.destroy,
-               font=('Arial', 10)).pack(pady=10)
+        self.overall_label.pack(pady=(2, 10))
 
     def _on_difficulty_changed(self, _event=None):
         self.current_difficulty = self.difficulty_var.get()
         self._refresh()
 
-    def _refresh(self):
-        s = self.history.stats_for(self.current_difficulty)
+    @staticmethod
+    def _derived_display(s: Dict) -> Dict:
+        """Add human-readable display keys to a raw stats dict."""
         s['_win_rate_pct'] = (
             f"{s['win_rate']*100:.1f}%" if (s['won'] + s['lost']) else '—'
         )
+        s.setdefault('_peak_wr_pct', '—')
         s['_avg_win_str'] = _format_seconds(s['avg_win_seconds'])
         s['_best_win_str'] = _format_seconds(s['best_win_seconds'])
         s['_best_cpm_str'] = (
@@ -395,10 +462,91 @@ class StatsDialog:
             f"{s['best_flags_per_minute']:.1f}"
             if s.get('best_flags_per_minute') else '—'
         )
+        return s
+
+    # Green shades (light → dark) indexed by streak depth
+    _WIN_COLORS = ('#86efac', '#4ade80', '#22c55e', '#16a34a', '#15803d')
+    # Red shades (light → dark) indexed by streak depth
+    _LOSS_COLORS = ('#fca5a5', '#f87171', '#ef4444', '#dc2626', '#b91c1c')
+    _ABANDONED_COLOR = '#9ca3af'
+
+    def _draw_histogram(self):
+        self.canvas.delete('all')
+        games = [r for r in self.history._records
+                 if r.get('difficulty') == self.current_difficulty
+                 and not r.get('ai_used', False)]
+        games = games[-LAST_N:]
+        if not games:
+            self.canvas.create_text(
+                255, 35, text='No games yet', fill='#aaa',
+                font=('Arial', 10, 'italic'))
+            return
+
+        cw = int(self.canvas['width'])
+        ch = int(self.canvas['height'])
+        top_pad = 6
+        usable_h = ch - top_pad
+        n = len(games)
+        bar_w = max((cw / n) - 1, 1)
+        step = cw / n
+
+        # First pass: compute streak depth for each game and find the max
+        streaks: List[int] = []
+        streak = 0
+        prev_result = None
+        for g in games:
+            result = g.get('result')
+            if result == prev_result and result in ('won', 'lost'):
+                streak += 1
+            else:
+                streak = 1
+            prev_result = result
+            streaks.append(streak)
+
+        max_streak = max(streaks)
+        base_h = max(round(usable_h * 0.15), 2)
+        incr = (usable_h - base_h) / max(max_streak - 1, 1)
+
+        # Second pass: draw bars
+        for i, (g, sk) in enumerate(zip(games, streaks)):
+            result = g.get('result')
+
+            if result == 'abandoned':
+                color = self._ABANDONED_COLOR
+                bar_h = base_h
+            elif result == 'won':
+                bar_h = round(base_h + (sk - 1) * incr)
+                color = self._WIN_COLORS[min(sk - 1,
+                                             len(self._WIN_COLORS) - 1)]
+            elif result == 'lost':
+                bar_h = round(base_h + (sk - 1) * incr)
+                color = self._LOSS_COLORS[min(sk - 1,
+                                              len(self._LOSS_COLORS) - 1)]
+            else:
+                continue
+
+            x1 = i * step
+            x2 = x1 + bar_w
+            self.canvas.create_rectangle(
+                x1, ch - bar_h, x2, ch, fill=color, outline='')
+
+    def _refresh(self):
+        s_all = self._derived_display(
+            self.history.stats_for(self.current_difficulty))
+        s_recent = self._derived_display(
+            self.history.stats_for(self.current_difficulty, last_n=LAST_N))
+
+        peak = self.history.peak_rolling_win_rate(
+            self.current_difficulty, window=LAST_N)
+        s_recent['_peak_wr_pct'] = (
+            f"{peak*100:.1f}%" if peak is not None else '—'
+        )
 
         for _, key in self.LABELS:
-            value = s.get(key, '—')
-            self.value_labels[key].config(text=str(value))
+            self.all_labels[key].config(text=str(s_all.get(key, '—')))
+            self.recent_labels[key].config(text=str(s_recent.get(key, '—')))
+
+        self._draw_histogram()
 
         overall = self.history.overall_stats()
         self.overall_label.config(
