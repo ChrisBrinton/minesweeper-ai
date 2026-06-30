@@ -279,3 +279,6 @@ gpu_benchmark_*.json
 # Configuration files with sensitive data (if any)
 config.local.json
 .env.local
+
+# oh-my-claudecode state
+.omc/
