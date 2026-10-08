@@ -254,8 +254,12 @@ class GameBoard:
         return self.cells_revealed == total_safe_cells
     
     def get_remaining_mines(self) -> int:
-        """Get the number of remaining mines (total mines - flags used)"""
-        return max(0, self.total_mines - self.flags_used)
+        """Get the number of remaining mines (total mines - flags used).
+
+        Goes negative when the player has placed more flags than there are
+        mines, matching classic Minesweeper's counter.
+        """
+        return self.total_mines - self.flags_used
     
     def reset_game(self, difficulty: str = None):
         """Reset the game to initial state"""

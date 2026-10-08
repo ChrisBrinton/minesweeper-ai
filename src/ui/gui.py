@@ -541,91 +541,72 @@ class MinesweeperGUI:
         self.mine_display.pack(side='left')
         
         # Smiley button (centered)
-        smiley_frame = tk.Frame(top_frame, bg='lightgray')
-        smiley_frame.pack(side='left', expand=True)
-        
-        self.smiley_button = SmileyButton(smiley_frame, command=self._restart_game)
+        self._smiley_frame = tk.Frame(top_frame, bg='lightgray')
+        self._smiley_frame.pack(side='left', expand=True)
+
+        self.smiley_button = SmileyButton(self._smiley_frame, command=self._restart_game)
         self.smiley_button.pack()
         
         # Timer
         self.timer_display = DigitalDisplay(top_frame)
         self.timer_display.pack(side='right')
 
-        # Live stats + AI buttons.  Two-row layout so everything fits
-        # within the board width:
-        #   Row 1: Cells/min  |  Progress   |  [Auto-play  ]
-        #   Row 2: Flags/min  |  Safe: N    |  [Suggest move]
-        #                                      [Heatmap     ]
-        live_frame = tk.Frame(main_frame, bg='lightgray')
-        live_frame.pack(fill='x', padx=5, pady=(0, 5))
-
-        stats_frame = tk.Frame(live_frame, bg='lightgray')
-        stats_frame.pack(side='left', fill='both', expand=True)
-
-        stats_row1 = tk.Frame(stats_frame, bg='lightgray')
-        stats_row1.pack(fill='x')
-        stats_row2 = tk.Frame(stats_frame, bg='lightgray')
-        stats_row2.pack(fill='x')
-
-        self.live_cpm_label = tk.Label(
-            stats_row1, text='Cells/min: —', width=14, anchor='w',
-            font=('Arial', 9), bg='lightgray', fg='black',
-        )
-        self.live_cpm_label.pack(side='left', padx=(8, 0))
-        self.live_progress_label = tk.Label(
-            stats_row1, text='Progress: —', width=13, anchor='w',
-            font=('Arial', 9), bg='lightgray', fg='black',
-        )
-        self.live_progress_label.pack(side='left', padx=8)
-
-        self.live_fpm_label = tk.Label(
-            stats_row2, text='Flags/min: —', width=14, anchor='w',
-            font=('Arial', 9), bg='lightgray', fg='black',
-        )
-        self.live_fpm_label.pack(side='left', padx=(8, 0))
-        self.safe_count_label = tk.Label(
-            stats_row2, text='Safe: —', width=9, anchor='w',
-            font=('Arial', 9), bg='lightgray', fg='#0a7d0a',
-        )
-        if self.settings_manager.safe_count_enabled:
-            self.safe_count_label.pack(side='left', padx=8)
-
-        # AI action buttons: vertical stack on the right
-        self._ai_button_stack = tk.Frame(live_frame, bg='lightgray')
+        # Compact header: AI buttons live in the counter row, flanking the
+        # smiley, and live stats collapse to a single thin line below:
+        #   [000] [Auto][Hint]   (:)   [Heat] [000]
+        #   Cells/min · Flags/min · Progress · Safe        P(mine): 12%
+        btn_opts = dict(font=('Arial', 8), state='disabled',
+                        padx=4, pady=0, bd=1)
+        self._ai_left = tk.Frame(top_frame, bg='lightgray')
         self.autoplay_var = tk.IntVar(value=0)
         self.autoplay_button = tk.Checkbutton(
-            self._ai_button_stack, text='Auto-play',
-            font=('Arial', 9), state='disabled',
+            self._ai_left, text='Auto',
             variable=self.autoplay_var,
             indicatoron=False,
             selectcolor='#fff3a8',
-            width=14,
             command=self._on_autoplay_toggle,
+            **btn_opts,
         )
-        self.autoplay_button.pack(fill='x')
+        self.autoplay_button.pack(side='left', padx=(6, 2))
         self.suggest_button = tk.Button(
-            self._ai_button_stack, text='Suggest move',
-            font=('Arial', 9), state='disabled',
+            self._ai_left, text='Hint',
             command=self._on_suggest_click,
+            **btn_opts,
         )
-        self.suggest_button.pack(fill='x')
-        self.confidence_label = tk.Label(
-            self._ai_button_stack, text='',
-            font=('Arial', 8), bg='lightgray', fg='#666',
-            anchor='center',
-        )
-        self.confidence_label.pack(fill='x')
+        self.suggest_button.pack(side='left', padx=2)
+
+        self._ai_right = tk.Frame(top_frame, bg='lightgray')
         self.heatmap_var = tk.IntVar(value=0)
         self.heatmap_button = tk.Checkbutton(
-            self._ai_button_stack, text='Heatmap',
-            font=('Arial', 9), state='disabled',
+            self._ai_right, text='Heatmap',
             variable=self.heatmap_var,
             indicatoron=False,
             selectcolor='#ffcccc',
-            width=14,
             command=self._on_heatmap_toggle,
+            **btn_opts,
         )
-        self.heatmap_button.pack(fill='x')
+        self.heatmap_button.pack(side='right', padx=(2, 6))
+
+        stats_row = tk.Frame(main_frame, bg='lightgray')
+        stats_row.pack(fill='x', padx=5)
+        stat_opts = dict(font=('Arial', 8), bg='lightgray', anchor='w')
+
+        self.live_cpm_label = tk.Label(
+            stats_row, text='Cells/min: —', width=15, fg='black', **stat_opts)
+        self.live_cpm_label.pack(side='left')
+        self.live_fpm_label = tk.Label(
+            stats_row, text='Flags/min: —', width=15, fg='black', **stat_opts)
+        self.live_fpm_label.pack(side='left')
+        self.live_progress_label = tk.Label(
+            stats_row, text='Progress: —', width=12, fg='black', **stat_opts)
+        self.live_progress_label.pack(side='left')
+        self.confidence_label = tk.Label(
+            stats_row, text='', fg='#666', **stat_opts)
+        self.confidence_label.pack(side='right')
+        self.safe_count_label = tk.Label(
+            stats_row, text='Safe: —', width=8, fg='#0a7d0a', **stat_opts)
+        if self.settings_manager.safe_count_enabled:
+            self.safe_count_label.pack(side='left')
 
         if self.settings_manager.ai_enabled:
             self._show_ai_buttons()
@@ -838,13 +819,13 @@ class MinesweeperGUI:
         """Reset live-stats labels to placeholder for a fresh game."""
         if self.live_cpm_label is not None:
             self.live_cpm_label.config(
-                text='Cells/min: —', fg='black', font=('Arial', 9))
+                text='Cells/min: —', fg='black', font=('Arial', 8))
         if self.live_fpm_label is not None:
             self.live_fpm_label.config(
-                text='Flags/min: —', fg='black', font=('Arial', 9))
+                text='Flags/min: —', fg='black', font=('Arial', 8))
         if self.live_progress_label is not None:
             self.live_progress_label.config(
-                text='Progress: —', fg='black', font=('Arial', 9))
+                text='Progress: —', fg='black', font=('Arial', 8))
         if self.safe_count_label is not None:
             self.safe_count_label.config(text='Safe: —')
 
@@ -874,9 +855,9 @@ class MinesweeperGUI:
         if ai_used:
             # Rates are meaningless once AI is helping — show neutral values
             self.live_cpm_label.config(
-                text='Cells/min: — (AI)', fg='#888', font=('Arial', 9))
+                text='Cells/min: — (AI)', fg='#888', font=('Arial', 8))
             self.live_fpm_label.config(
-                text='Flags/min: — (AI)', fg='#888', font=('Arial', 9))
+                text='Flags/min: — (AI)', fg='#888', font=('Arial', 8))
             return
 
         # Rates only make sense once the timer has started
@@ -897,12 +878,12 @@ class MinesweeperGUI:
         self.live_cpm_label.config(
             text=f'Cells/min: {cpm:.0f}',
             fg=record_color if cpm_record else 'black',
-            font=('Arial', 9, 'bold') if cpm_record else ('Arial', 9),
+            font=('Arial', 8, 'bold') if cpm_record else ('Arial', 8),
         )
         self.live_fpm_label.config(
             text=f'Flags/min: {fpm:.1f}',
             fg=record_color if fpm_record else 'black',
-            font=('Arial', 9, 'bold') if fpm_record else ('Arial', 9),
+            font=('Arial', 8, 'bold') if fpm_record else ('Arial', 8),
         )
     
     def _update_safe_count(self):
@@ -1060,7 +1041,7 @@ class MinesweeperGUI:
                 self._stop_autoplay()
                 self._hide_ai_buttons()
             if self.settings_manager.safe_count_enabled:
-                self.safe_count_label.pack(side='left', padx=8)
+                self.safe_count_label.pack(side='left')
                 self._update_safe_count()
             else:
                 self.safe_count_label.pack_forget()
@@ -1068,13 +1049,18 @@ class MinesweeperGUI:
                       on_changed=_on_settings_changed)
 
     def _show_ai_buttons(self):
-        """Pack the AI button stack on the right side of the live-stats area."""
-        self._ai_button_stack.pack(side='right', padx=8)
+        """Pack the AI buttons into the counter row, either side of the smiley."""
+        # `after=` keeps them just inside the counters even when
+        # re-shown after the rest of the row was packed.
+        self._ai_left.pack(side='left', after=self.mine_display)
+        self._ai_right.pack(side='right', after=self.timer_display)
         self._update_action_buttons()
 
     def _hide_ai_buttons(self):
-        """Remove the AI button stack from the live-stats area."""
-        self._ai_button_stack.pack_forget()
+        """Remove the AI buttons from the counter row."""
+        self._ai_left.pack_forget()
+        self._ai_right.pack_forget()
+        self.confidence_label.config(text='')
 
     def _maybe_preload_model(self):
         """If AI is enabled, kick off model load on a daemon thread so the
