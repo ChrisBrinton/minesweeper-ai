@@ -1221,7 +1221,7 @@ class MinesweeperGUI:
         if not self.game_board or self.game_board.game_state != GameState.PLAYING:
             return
 
-        source = self.settings.heatmap_source
+        source = self.settings_manager.heatmap_source
 
         if source == 'constraint':
             inf = self._ensure_inference()
@@ -1258,6 +1258,27 @@ class MinesweeperGUI:
                 return
             self.board_canvas.show_comparison_heatmap(
                 prob_data['probabilities'], prob_data['divergence'])
+
+        elif source == 'model':
+            inf = self._ensure_inference()
+            if inf is None:
+                return
+            try:
+                prob_data = inf.get_model_only_probabilities(self.game_board)
+            except FileNotFoundError as e:
+                messagebox.showerror(
+                    'AI model not found',
+                    f'{e}\n\nSet the model path in Game → Settings.')
+                self._inference = None
+                self.heatmap_var.set(0)
+                return
+            except Exception as e:
+                messagebox.showerror('Heatmap failed', str(e))
+                self.heatmap_var.set(0)
+                return
+            if prob_data is None:
+                return
+            self.board_canvas.show_heatmap(prob_data['probabilities'])
 
         else:
             inf = self._ensure_inference()

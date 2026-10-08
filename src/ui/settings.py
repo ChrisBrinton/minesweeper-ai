@@ -191,6 +191,7 @@ class SettingsDialog:
         heatmap_frame.grid(row=7, column=1, columnspan=2, sticky='w')
         for value, label in [
             ('hybrid', 'Hybrid (solver + model)'),
+            ('model', 'Model only'),
             ('constraint', 'Constraint engine'),
             ('both', 'Both (comparison)'),
         ]:
@@ -202,6 +203,7 @@ class SettingsDialog:
         Label(
             body,
             text='Hybrid uses solver for deterministic cells + model for uncertain.\n'
+                 'Model only shows raw network P(mine) with no solver deduction.\n'
                  'Constraint engine computes exact P(mine) from board logic.\n'
                  'Both shows model vs constraint engine for comparison.',
             font=('Arial', 8), fg='#666', justify='left',

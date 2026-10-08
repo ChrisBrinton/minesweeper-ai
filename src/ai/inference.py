@@ -206,6 +206,41 @@ class MinesweeperInference:
             'hidden': hidden,
         }
 
+    def get_model_only_probabilities(self, game_board: GameBoard) -> Optional[Dict]:
+        """Compute P(mine) for every hidden cell using ONLY the model.
+
+        Unlike get_mine_probabilities, this performs NO solver deduction:
+        deterministically-safe/mine cells are NOT overridden, so the heatmap
+        shows the raw network output across the entire board. The solver is
+        used only to decode the board state into hidden/flagged/revealed.
+        """
+        rows, cols = game_board.rows, game_board.cols
+        state = _state_from_board(game_board)
+
+        solver = AlgorithmicSolver(rows, cols, game_board.total_mines)
+        hidden, _flagged, _revealed = solver._parse_state(state)  # decode only
+        if not hidden:
+            return None
+
+        if self.model is None:
+            self.load()
+        with torch.no_grad():
+            st = (torch.from_numpy(state)
+                  .permute(2, 0, 1).unsqueeze(0).contiguous().to(self.device))
+            logits = self.model(st).squeeze(0)
+            model_probs = torch.sigmoid(logits).cpu().numpy()
+
+        probs = np.full((rows, cols), np.nan, dtype=np.float32)
+        for r, c in hidden:
+            probs[r, c] = float(model_probs[r, c])
+
+        return {
+            'probabilities': probs,
+            'known_safe': set(),
+            'known_mines': set(),
+            'hidden': hidden,
+        }
+
     def get_constraint_probabilities(self, game_board: GameBoard) -> Optional[Dict]:
         """Compute exact P(mine) using the constraint engine.
 
